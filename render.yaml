@@ -1,0 +1,28 @@
+# Render infrastructure-as-code.
+# Either commit this and use "New → Blueprint" on Render to provision in one click,
+# or skip the file entirely and create the service manually in the dashboard.
+# Secrets (sync: false) must be filled in via the Render UI after creation — they are
+# NEVER read from this committed file.
+services:
+  - type: web
+    name: techx-tv
+    runtime: node
+    plan: free                       # 750h/mo, sleeps after 15 min idle. Upgrade to "starter" ($7) for always-on.
+    region: singapore                # nearest to India users; change to oregon / frankfurt if you prefer.
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      # QSTASH_TOKEN is intentionally omitted — on Render the analyze route runs inline.
+      # Add it only if you want serverless-style queueing.
