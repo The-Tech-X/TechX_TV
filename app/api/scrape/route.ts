@@ -30,11 +30,11 @@ export async function POST(req: Request) {
     const reader = new Readability(doc.window.document);
     const article = reader.parse();
 
-    let title = article?.title;
-    if (!title) {
-       title = doc.window.document.querySelector('title')?.textContent || url;
-    }
-    
+    const title: string =
+      article?.title ||
+      doc.window.document.querySelector('title')?.textContent ||
+      url;
+
     // Clean up text content (remove excessive newlines)
     const content = article?.textContent ? article.textContent.replace(/\s+/g, ' ').trim() : 'No main content could be extracted.';
 
@@ -42,9 +42,9 @@ export async function POST(req: Request) {
     const domainUrl = new URL(url);
     const source = domainUrl.hostname.replace('www.', '');
 
-    return NextResponse.json({ 
-      title: title.trim(), 
-      source, 
+    return NextResponse.json({
+      title: title.trim(),
+      source,
       url,
       content
     });
