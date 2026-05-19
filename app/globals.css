@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Custom 'xs' breakpoint (480px) — used for inline labels on small phones */
+@theme {
+  --breakpoint-xs: 30rem;
+}
+
 :root {
   --bg-base:    #080810;
   --bg-surface: #0f0f1a;
@@ -15,7 +20,12 @@
 /* ── Base ─────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
 
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  /* Prevent iOS text-size adjust on rotation */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
 
 body {
   background: var(--bg-base);
@@ -23,6 +33,24 @@ body {
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Avoid horizontal jitter from mobile address bar */
+  overscroll-behavior-y: contain;
+}
+
+/* Better tap experience on touch devices — kill the iOS tap highlight,
+   keep our own active states. */
+@media (hover: none) {
+  a, button {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Make sure text inputs don't auto-zoom on iOS (16px+ font) */
+input, textarea, select {
+  font-size: 16px;
+}
+@media (min-width: 640px) {
+  input, textarea, select { font-size: inherit; }
 }
 
 /* Script editor typography */
@@ -41,6 +69,11 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
 
+/* Hide scrollbars on touch (mobile) — they take up usable space and look ugly */
+@media (hover: none) and (pointer: coarse) {
+  ::-webkit-scrollbar { width: 0; height: 0; }
+}
+
 /* ── Focus ────────────────────────────────────────── */
 :focus-visible {
   outline: 2px solid rgba(99,102,241,0.6);
@@ -49,6 +82,21 @@ body {
 
 /* ── Selection ────────────────────────────────────── */
 ::selection { background: rgba(99,102,241,0.28); }
+
+/* ── Line-clamp helpers (Tailwind v4 keeps these via core, but
+       declaring them explicitly avoids any plugin dependency.) ───── */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.line-clamp-4 {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 /* ── Animations ───────────────────────────────────── */
 @keyframes fade-up {
@@ -73,6 +121,16 @@ body {
 .animate-fade-in       { animation: fade-in 0.25s ease both; }
 .animate-slide-right   { animation: slide-in-right 0.3s ease both; }
 .animate-pulse-ring    { animation: pulse-ring 1.8s ease-out infinite; }
+
+/* Honor user reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* ── Card glow on hover ───────────────────────────── */
 .card-glow {
@@ -102,6 +160,7 @@ body {
 audio {
   border-radius: 8px;
   height: 36px;
+  max-width: 100%;
 }
 audio::-webkit-media-controls-panel {
   background: rgba(99,102,241,0.08);
