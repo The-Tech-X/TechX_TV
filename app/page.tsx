@@ -111,7 +111,7 @@ export default function TopicDiscoveryPage() {
             {/* Language toggle */}
             <div
               className="flex items-center gap-0.5 bg-[#0c0c18] p-0.5 rounded-lg border border-white/[0.06] shrink-0"
-              title="Script language — English uses Llama-3-70B, Tenglish uses Sarvam-M"
+              title="Script language — both English and Tenglish run on Llama-3.1-70B"
             >
               <Languages className="w-3.5 h-3.5 text-slate-600 ml-1.5" />
               {(["english", "tenglish"] as const).map(lang => (
@@ -284,6 +284,15 @@ export default function TopicDiscoveryPage() {
                 {update.episode_id && (
                   <span className="hidden sm:inline text-[10px] text-slate-600 bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.05]">
                     linked
+                  </span>
+                )}
+                {update.analysis_json && update.status !== "done" && (
+                  <span
+                    title="A research brief has been generated for this topic — it can be sent straight to the script writer from Analytics."
+                    className="px-1.5 sm:px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 text-[10px] sm:text-[11px] font-semibold border border-emerald-500/20 flex items-center gap-1"
+                  >
+                    <Brain className="w-2.5 h-2.5" />
+                    Analyzed
                   </span>
                 )}
                 {update.status === "selected" && (

@@ -1,17 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { getEpisodes } from "../actions/episodes";
 import { getUpdatesByEpisode } from "../actions/updates";
-import { Headphones, Loader2, Calendar, Volume2, FileText, Clock, Tag, ChevronDown, ChevronUp } from "lucide-react";
+import { episodeStatus } from "../lib/episodeStatus";
+import {
+  Headphones, Loader2, Calendar, Volume2, FileText, Clock, Tag, ChevronDown, ChevronUp,
+  AlertCircle, Brain, ArrowRight,
+} from "lucide-react";
 
 function EpisodeCard({ ep }: { ep: any }) {
   const [linkedTopics, setLinkedTopics] = useState<any[]>([]);
   const [showTopics, setShowTopics] = useState(false);
 
+  const status = episodeStatus(ep);
   const wordCount = ep.script_text ? ep.script_text.split(/\s+/).filter(Boolean).length : 0;
   const estMin    = Math.max(1, Math.round(wordCount / 130));
   const preview   = ep.script_text ? ep.script_text.substring(0, 180).trim() + "…" : null;
+  const errMsg    = ep.analysis_json?.error;
+  const lang      = ep.analysis_json?.language === "tenglish" ? "tenglish" : "english";
 
   const handleToggleTopics = async () => {
     if (!showTopics && linkedTopics.length === 0) {
@@ -29,6 +37,18 @@ function EpisodeCard({ ep }: { ep: any }) {
           {ep.week_id}
         </span>
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {status === "generating" && (
+            <span className="flex items-center gap-1 text-amber-400 text-[11px] font-medium">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Generating
+            </span>
+          )}
+          {status === "failed" && (
+            <span className="flex items-center gap-1 text-red-400 text-[11px] font-medium">
+              <AlertCircle className="w-3 h-3" />
+              Failed
+            </span>
+          )}
           {ep.audio_url && (
             <span className="flex items-center gap-1 text-emerald-500 text-[11px] font-medium">
               <Volume2 className="w-3 h-3" />
@@ -46,6 +66,25 @@ function EpisodeCard({ ep }: { ep: any }) {
       <div className="px-4 sm:px-5 py-3.5 sm:py-4 flex-1">
         {preview ? (
           <p className="text-slate-400 text-sm leading-relaxed line-clamp-4">{preview}</p>
+        ) : status === "failed" ? (
+          <div className="space-y-2">
+            <p className="text-red-300 text-sm flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="line-clamp-3">{errMsg || "Script generation failed. Open Analytics to retry."}</span>
+            </p>
+            <Link
+              href={`/analytics?episode=${encodeURIComponent(ep.week_id)}&lang=${lang}`}
+              className="inline-flex items-center gap-1.5 text-xs text-indigo-300 hover:text-indigo-200 transition-colors"
+            >
+              <Brain className="w-3 h-3" /> Open Analytics
+              <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+        ) : status === "generating" ? (
+          <p className="text-amber-300/90 text-sm italic flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Script generation in progress — refresh in a minute.
+          </p>
         ) : (
           <p className="text-slate-600 text-sm italic flex items-center gap-2">
             <FileText className="w-4 h-4" />

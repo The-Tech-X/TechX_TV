@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, FileText, Headphones, Settings, Radio, Menu, X } from "lucide-react";
+import { LayoutDashboard, FileText, Headphones, Settings, Radio, Menu, X, Brain } from "lucide-react";
 
 const links = [
   { href: "/",              icon: LayoutDashboard, label: "Topic Discovery",  desc: "Add & curate topics" },
+  { href: "/analytics",     icon: Brain,           label: "Analytics",        desc: "Per-topic briefs" },
   { href: "/script-studio", icon: FileText,        label: "Script Studio",    desc: "Edit & generate audio" },
   { href: "/episodes",      icon: Headphones,      label: "Episodes",         desc: "Browse all episodes" },
 ];

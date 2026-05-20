@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getEpisodes, updateEpisodeScript } from "../actions/episodes";
+import Link from "next/link";
+import { getEpisodes, updateEpisodeScript, getTopicsForEpisodeRetry } from "../actions/episodes";
 import { getUpdatesByEpisode } from "../actions/updates";
+import { episodeStatus, episodeStatusLabel } from "../lib/episodeStatus";
 import {
   Headphones, Save, RefreshCw, Loader2, Mic, FileText,
-  Volume2, CheckCircle2, Clock, AlignLeft, Link2, ListMusic, ChevronLeft
+  Volume2, CheckCircle2, Clock, AlignLeft, Link2, ListMusic, ChevronLeft,
+  AlertCircle, Sparkles, ArrowRight, Brain
 } from "lucide-react";
 
 export default function ScriptStudioPage() {
@@ -19,6 +22,8 @@ export default function ScriptStudioPage() {
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [audioStatus, setAudioStatus] = useState("");
   const [episodeListOpen, setEpisodeListOpen] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryStatus, setRetryStatus] = useState("");
 
   useEffect(() => { loadEpisodes(); }, []);
 
@@ -42,9 +47,73 @@ export default function ScriptStudioPage() {
     setScriptText(ep.script_text || "");
     setSaveSuccess(false);
     setAudioStatus("");
+    setRetryStatus("");
     setEpisodeListOpen(false);
     const topics = await getUpdatesByEpisode(ep.id);
     setLinkedTopics(topics);
+  };
+
+  // Re-fire /api/analyze for an episode whose initial run failed or timed out.
+  // We pull topic_ids out of the episode's analysis_json (written when the
+  // first attempt started) and resubmit them.
+  const handleRetryScript = async () => {
+    if (!selectedEpisode) return;
+    setIsRetrying(true);
+    setRetryStatus("Fetching original topics…");
+    try {
+      const { topics, language } = await getTopicsForEpisodeRetry(selectedEpisode.week_id);
+      if (!topics.length) {
+        setRetryStatus("Couldn't find the source topics for this episode. Re-create it from Topic Discovery.");
+        setTimeout(() => { setIsRetrying(false); setRetryStatus(""); }, 5000);
+        return;
+      }
+
+      const payloadTopics = topics.map((t: any) => ({
+        id: t.id,
+        title: t.title,
+        source: t.source,
+        content: t.content,
+        analysis_json: t.analysis_json,
+      }));
+
+      setRetryStatus("Re-sending briefs to the script writer…");
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ episodeId: selectedEpisode.week_id, topics: payloadTopics, language }),
+      });
+      if (!res.ok) throw new Error("Failed to restart script generation");
+
+      setRetryStatus("Generating podcast script…");
+      let attempts = 0;
+      let done = false;
+      while (!done && attempts < 60) {
+        await new Promise(r => setTimeout(r, 4000));
+        attempts++;
+        setRetryStatus(`Generating podcast script… (${attempts * 4}s elapsed)`);
+        const eps = await getEpisodes();
+        const refreshed = eps.find((e: any) => e.id === selectedEpisode.id);
+        if (refreshed?.script_text) {
+          done = true;
+          setEpisodes(eps);
+          setSelectedEpisode(refreshed);
+          setScriptText(refreshed.script_text);
+        } else if (refreshed?.analysis_json?.error) {
+          throw new Error(refreshed.analysis_json.error);
+        }
+      }
+
+      if (done) {
+        setRetryStatus("Script ready.");
+        setTimeout(() => setRetryStatus(""), 3000);
+      } else {
+        setRetryStatus("Still processing in background — refresh in a minute.");
+      }
+    } catch (e: any) {
+      setRetryStatus(`Error: ${e.message}`);
+    } finally {
+      setTimeout(() => setIsRetrying(false), 1500);
+    }
   };
 
   const handleSave = async () => {
@@ -116,7 +185,9 @@ export default function ScriptStudioPage() {
             No episodes yet.<br />Go to Topic Discovery to create one.
           </div>
         )}
-        {episodes.map(ep => (
+        {episodes.map(ep => {
+          const status = episodeStatus(ep);
+          return (
           <button
             key={ep.id}
             onClick={() => handleSelectEpisode(ep)}
@@ -134,10 +205,21 @@ export default function ScriptStudioPage() {
               <span className="text-[11px] text-slate-600">
                 {new Date(ep.created_at).toLocaleDateString()}
               </span>
+              {status === "generating" && (
+                <span className="text-[10px] text-amber-400/90 flex items-center gap-1">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" /> Generating
+                </span>
+              )}
+              {status === "failed" && (
+                <span className="text-[10px] text-red-400/90 flex items-center gap-1">
+                  <AlertCircle className="w-2.5 h-2.5" /> Failed
+                </span>
+              )}
               {ep.audio_url && <Volume2 className="w-3 h-3 text-emerald-600 ml-auto" />}
             </div>
           </button>
-        ))}
+        );
+        })}
       </div>
     </>
   );
@@ -237,6 +319,70 @@ export default function ScriptStudioPage() {
                 </button>
               </div>
             </div>
+
+            {/* Status banner — only shown when we don't have a finished script yet */}
+            {(() => {
+              const status = episodeStatus(selectedEpisode);
+              if (status === "ready") return null;
+              const isFailed = status === "failed";
+              const isGenerating = status === "generating";
+              const errMsg = selectedEpisode.analysis_json?.error;
+              return (
+                <div className={`rounded-2xl border px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 ${
+                  isFailed
+                    ? "bg-red-500/[0.06] border-red-500/20"
+                    : isGenerating
+                      ? "bg-amber-500/[0.06] border-amber-500/20"
+                      : "bg-white/[0.02] border-white/[0.07]"
+                }`}>
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    {isFailed
+                      ? <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                      : isGenerating
+                        ? <Loader2 className="w-5 h-5 text-amber-400 animate-spin shrink-0 mt-0.5" />
+                        : <FileText className="w-5 h-5 text-slate-500 shrink-0 mt-0.5" />}
+                    <div className="min-w-0">
+                      <div className={`text-sm font-semibold ${isFailed ? "text-red-300" : isGenerating ? "text-amber-300" : "text-slate-300"}`}>
+                        {episodeStatusLabel(status)}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        {isFailed && (errMsg
+                          ? `Script generation failed: ${errMsg}`
+                          : "Script generation failed. Try again or open Analytics to edit the briefs.")}
+                        {isGenerating && "Script generation is running in the background. Refresh to check progress."}
+                        {status === "pending" && "No script yet. Generate one from the Analytics page."}
+                      </div>
+                      {retryStatus && (
+                        <div className="text-xs text-indigo-300 mt-1.5 flex items-center gap-1.5">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          {retryStatus}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Link
+                      href={`/analytics?episode=${encodeURIComponent(selectedEpisode.week_id)}&lang=${selectedEpisode.analysis_json?.language === "tenglish" ? "tenglish" : "english"}`}
+                      className="flex items-center gap-1.5 bg-white/[0.05] hover:bg-white/[0.09] text-slate-200 text-xs px-3 py-2 rounded-xl font-medium border border-white/[0.07] transition-all"
+                    >
+                      <Brain className="w-3.5 h-3.5" />
+                      Open Analytics
+                      <ArrowRight className="w-3 h-3 opacity-70" />
+                    </Link>
+                    {(isFailed || isGenerating) && Array.isArray(selectedEpisode.analysis_json?.topic_ids) && selectedEpisode.analysis_json.topic_ids.length > 0 && (
+                      <button
+                        onClick={handleRetryScript}
+                        disabled={isRetrying}
+                        className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs px-3 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-indigo-500/20"
+                      >
+                        {isRetrying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        {isRetrying ? "Retrying…" : "Retry script"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Script textarea */}
             <div className="flex-1 bg-[#13131f] border border-white/[0.06] rounded-2xl overflow-hidden flex flex-col min-h-[55vh] md:min-h-0">

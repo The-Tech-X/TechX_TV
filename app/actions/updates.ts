@@ -126,3 +126,25 @@ export async function getSelectedUpdates() {
   }
   return data || [];
 }
+
+/**
+ * Topics the Analytics page can offer for the next episode: anything the user
+ * has currently selected, plus anything previously analyzed (analysis_json set)
+ * that hasn't yet been linked to a finished script (status != 'done'). Lets the
+ * user reuse work from earlier sessions without going back to Topic Discovery.
+ */
+export async function getAnalyzableUpdates() {
+  const { data, error } = await supabase
+    .from('updates')
+    .select('*')
+    .neq('status', 'done')
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.error("Error fetching analyzable updates:", error);
+    return [];
+  }
+  // Keep currently-selected topics (which may not yet have an analysis) plus
+  // any previously-analyzed pending ones. Drop bare pending topics with no
+  // analysis — those still belong on Topic Discovery, not here.
+  return (data || []).filter(t => t.status === 'selected' || t.analysis_json);
+}
