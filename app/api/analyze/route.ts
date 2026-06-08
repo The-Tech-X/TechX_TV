@@ -42,6 +42,9 @@ function isTransientError(err: any): boolean {
   const code = err.code || err.cause?.code;
   if (code && TRANSIENT_ERROR_CODES.has(code)) return true;
   if (err.name === 'AbortError') return true;
+  // NIM sometimes returns an empty/partial body — res.json() throws a SyntaxError
+  // with no .code, so it wasn't being retried. Treat it as transient.
+  if (err instanceof SyntaxError && err.message.toLowerCase().includes('json')) return true;
   return false;
 }
 
@@ -81,14 +84,24 @@ export async function POST(req: Request) {
     if (isCallback) {
       const episodeWeekId = url.searchParams.get('episodeId');
       const topicIdsParam  = url.searchParams.get('topicIds') || '';
-      // 'text' for models that can't emit reliable JSON (e.g. Sarvam-M), 'json' otherwise.
       const responseFormat = url.searchParams.get('format') === 'text' ? 'text' : 'json';
 
       if (!episodeWeekId) {
         return NextResponse.json({ error: 'Missing episodeId in callback' }, { status: 400 });
       }
 
-      const body = await req.json();
+      let body: any;
+      try {
+        body = await req.json();
+      } catch (parseErr: any) {
+        const errMsg = `Callback received non-JSON body from NIM: ${parseErr.message}`;
+        console.error('[Callback]', errMsg);
+        await supabase.from('episodes').upsert(
+          { week_id: episodeWeekId, analysis_json: { status: 'failed', error: errMsg.slice(0, 500), failed_at: new Date().toISOString() }, updated_at: new Date().toISOString() },
+          { onConflict: 'week_id' },
+        );
+        return NextResponse.json({ error: errMsg }, { status: 502 });
+      }
 
       if (!body.choices?.[0]?.message) {
         console.error('[Callback] Invalid AI response structure', JSON.stringify(body).slice(0, 500));
@@ -118,9 +131,7 @@ export async function POST(req: Request) {
       let recoveryNote: string | null = null;
 
       if (responseFormat === 'text') {
-        // Plain-text branch — Sarvam-M can't be trusted to emit valid JSON, so
-        // the Tenglish trigger asks it for the script as bare text. We just
-        // clean the prose and use it directly.
+        // Plain-text branch — model returns bare prose instead of JSON.
         scriptText = rawContent
           // Some models still wrap their output in ```...``` despite being told not to.
           .replace(/^```[a-z]*\n?/gi, '')
@@ -209,9 +220,22 @@ export async function POST(req: Request) {
         .replace(/^(okay|alright|sure|let me|i need to)[^.\n]{0,200}\.\s+/i, '')
         .trim();
 
-      analysisJson = recoveryNote
-        ? { script: scriptText, recovery_note: recoveryNote, finish_reason: finishReason }
-        : { script: scriptText };
+      // Fetch existing analysis_json so we can merge — preserves language, topic_ids,
+      // model and any other metadata written during the 'generating' phase.
+      const { data: existingEp } = await supabase
+        .from('episodes')
+        .select('analysis_json')
+        .eq('week_id', episodeWeekId)
+        .maybeSingle();
+
+      const existingMeta = existingEp?.analysis_json || {};
+      analysisJson = {
+        ...existingMeta,
+        status: 'done',
+        finish_reason: finishReason,
+        ...(recoveryNote ? { recovery_note: recoveryNote } : {}),
+      };
+      // script_text column holds the script; no need to duplicate it in analysis_json.
 
       // Upsert episode by week_id, get back the UUID
       const { data: episodeRow, error: upsertError } = await supabase
@@ -243,21 +267,13 @@ export async function POST(req: Request) {
     // ─── TRIGGER: Frontend calls this to kick off AI analysis ─────────────────
     } else {
       const body = await req.json();
-      const { episodeId, topics, language: rawLanguage } = body;
+      const { episodeId, topics } = body;
 
       if (!episodeId || !topics?.length) {
         return NextResponse.json({ error: 'Missing episodeId or topics' }, { status: 400 });
       }
 
-      const language: 'english' | 'tenglish' = rawLanguage === 'tenglish' ? 'tenglish' : 'english';
       const nvidiaApiKey = process.env.NVIDIA_API_KEY || '';
-
-      // Both languages now run on Llama-3.1-70B-Instruct on NVIDIA NIM.
-      // Sarvam-M (Indic-focused) was tried for Tenglish but couldn't handle
-      // 8-topic long-form scripts — it bundled topics, terminated early
-      // (~2-3k tokens), and couldn't emit reliable JSON. Llama-70B follows
-      // structured output, holds an 8-topic plan in context, and produces
-      // serviceable code-mixed Romanized Telugu with the system prompt below.
       const modelId = 'meta/llama-3.1-70b-instruct';
 
       const englishSystemPrompt = `You are Teja, the host of TechX TV — a sharp, no-fluff tech podcast for people who want to understand what's actually happening in the industry and why it matters to them personally.
@@ -278,10 +294,12 @@ These three lines are sacred. Everything between them is yours to shape.
 
 Line one of the script is NEVER a greeting. It is a one-line gut-punch from the day's most surprising story — a specific number, a shocking action, a contradiction that makes someone stop scrolling.
 
-WRONG: "Today we're covering some really big developments in AI."
-WRONG: "A lot happened this week in tech, so let's get into it."
-RIGHT: "An autonomous AI agent just burned five thousand dollars of its creator's money without permission."
-RIGHT: "Samsung just stacked 900 layers into a chip the size of your thumbnail."
+ILLUSTRATION ONLY — these are fictional examples to show the FORMAT, do NOT copy or paraphrase them:
+  WRONG FORMAT: "Today we're covering some really big developments in AI."
+  WRONG FORMAT: "A lot happened this week in tech, so let's get into it."
+  RIGHT FORMAT:  "[Specific dollar amount] just disappeared — and the AI that spent it didn't ask."
+  RIGHT FORMAT:  "[Company] just stacked [number] layers into a chip the size of your thumbnail."
+Your cold hook must be built from the REAL stories in today's topics, not from these illustrations.
 
 The cold hook is a fact, not a tease. Say the thing. Then immediately go into the opening line.
 
@@ -289,8 +307,10 @@ The cold hook is a fact, not a tease. Say the thing. Then immediately go into th
 
 The closing is not a summary list. It is a bookend. It calls back to the cold open story AND the final story, then pulls one thread that connects everything in the episode — the underlying theme, the tension, the thing that makes this particular set of stories feel like one coherent moment in time. Then the sign-off.
 
-WRONG: "That's everything for today's episode. If something here made you think, share it with someone who'd care. See you next time."
-RIGHT: "That's everything for today — from an AI burning five thousand dollars to graduates wondering if their first job already went to a machine. A lot is shifting, fast. If something here hit different, send it to someone who needs to hear it. See you next time. This is Teja, from The TechX TV."
+ILLUSTRATION ONLY — shows the FORMAT, do NOT copy or paraphrase:
+  WRONG FORMAT: "That's everything for today's episode. If something here made you think, share it with someone who'd care. See you next time."
+  RIGHT FORMAT:  "That's everything for today — from [cold open story callback] to [final story callback]. [One unifying theme sentence]. If something here hit different, send it to someone who needs to hear it. See you next time. This is Teja, from The TechX TV."
+Fill in the bracketed placeholders with the REAL stories from today's episode.
 
 The closing earns its place. One punchy theme sentence. Then out.
 
@@ -308,23 +328,22 @@ BANNED TRANSITIONS — never use these, ever:
 - Any variant of "But here's the thing" more than once per episode
 - "But what does this mean for the industry?"
 
-INSTEAD — earn the transition one of these ways:
+INSTEAD — earn the transition one of these ways. The lines below show STRUCTURE only — never copy them; build yours from the actual stories in today's episode:
 
 [1] THEMATIC PULL — the next story is the natural consequence or contrast of the previous one.
-"That pricing war has a winner and a loser. The loser is every Western AI lab that spent the last two years racing to build what DeepSeek just commoditized. Which brings us to Uber..."
+(structure) "[Story A conclusion]. Which brings us directly to [Company/Topic B]..."
 
 [2] TENSION PLANT — end one story with a question, answer it in the next.
-"The real question isn't whether the tool works. It's whether anyone will actually pay for it — and this week, we got the clearest answer yet."
+(structure) "The real question isn't [X]. It's [Y] — and this week, we got the clearest answer yet."
 
 [3] ZOOM OUT / ZOOM IN — shift the lens, not the topic.
-"Zoom out from the software layer for a second. While agents are rewriting how code gets written, a different battle is happening at the physical level — inside the chips themselves."
+(structure) "Zoom out from [layer A] for a second. While [story A trend] is happening, a different battle is playing out at [layer B]."
 
 [4] CONTRAST CUT — place two opposing ideas back to back, let the contrast do the work.
-"So on one side: a Chinese startup permanently cutting prices to the floor. On the other: an American company admitting it can't justify what it's already spent."
+(structure) "So on one side: [story A position]. On the other: [story B position]."
 
 [5] DIRECT PIVOT (for unrelated stories) — just be honest about the gear shift, but make it crisp.
-"Completely different corner of the industry, but worth your attention:"
-"Before we get to the hardware story — there's a security finding that changes the threat model for every voice-enabled product."
+(structure) "Completely different corner of the industry, but worth your attention:"
 
 Each transition is different. The listener should never be able to predict the shape of the next one.
 
@@ -335,16 +354,18 @@ The goal is never to give the listener everything. The goal is to give them the 
 Every story has three layers. Hit all three, in as few words as it takes:
 
 [1] THE SURFACE — what actually happened. Specific. No vague language.
-BAD: "There have been some developments in the AI security space."
-GOOD: "Researchers embedded nearly imperceptible audio signals into voice streams and used them to hijack 13 AI systems — including commercial platforms from Microsoft and Mistral."
+BAD FORMAT: "There have been some developments in [space]."
+GOOD FORMAT: "[Actor] did [specific thing] — [specific number/detail]."
 
 [2] THE TWIST — the thing that makes this surprising, contradictory, or bigger than it looks.
-BAD: "This has implications for the industry."
-GOOD: "The attack bypasses input sanitization entirely — which means every security layer built for text-based AI is now irrelevant for voice."
+BAD FORMAT: "This has implications for the industry."
+GOOD FORMAT: "[The surprising implication] — which means [consequence]."
 
 [3] THE STAKE — what this means for a real person, a real company, or a real decision being made right now.
-BAD: "Competitors will likely respond."
-GOOD: "Every voice AI product shipped in the last two years — call centers, smart devices, assistants — just inherited a vulnerability their team didn't know to test for."
+BAD FORMAT: "Competitors will likely respond."
+GOOD FORMAT: "Every [affected group] just [inherited consequence] — without knowing it."
+
+Use the REAL facts from today's topic briefs to fill these shapes. Never copy the format illustrations verbatim.
 
 Write the three layers in as few sentences as they need. A small story gets two sharp sentences. A big story gets a paragraph. Neither gets padding.
 
@@ -406,9 +427,9 @@ Predictable pacing is the enemy. The listener's brain checks out when it knows w
 
 When two stories share a pressure, a company, a trend, or a consequence — connect them inline while you're telling the second story. One sentence. Don't re-explain the first story, just pull the thread.
 
-"This is the same pressure we saw with DeepSeek's pricing — both moves are squeezing the same middle tier of the market."
+(structure only) "This is the same pressure we saw with [story A] — both moves are [shared consequence]."
 
-Only do this when the connection is real and specific. Forced connections are worse than no connections.
+Build the connection from the REAL stories in today's briefs. Only do this when the connection is genuine and specific. Forced connections are worse than no connections.
 
 ═══ LENGTH — driven by the story, never by a quota ═══
 
@@ -426,86 +447,8 @@ Return ONLY this JSON. The first character of your response is "{". No greeting,
   "script": "[cold hook line] Hey, welcome back to The TechX TV. I'm Teja — [punchy episode framing]. Let's get into it. … [one flowing script] … That's everything for today — from [cold open callback] to [final story callback]. [One-line theme.] If something here hit different, send it to someone who needs to hear it. See you next time. This is Teja, from The TechX TV."
 }`;
 
-      const tenglishSystemPrompt = `You are Teja, the host of TechX TV. Telugu audience kosam Tenglish lo matladu — Romanized Telugu + English tech words mixed naturally, exactly how Telugu people actually talk. NOT formal Telugu, NOT pure translation. Your output is ONE flowing podcast script — no segments, no bullets, no titles.
 
-═══ LANGUAGE RULES ═══
-- Romanized Telugu only (Latin script). Use "manam", "chuddam", "ante", "kani", "ippudu" — NOT "మనం", "చూద్దాం". NO Telugu script characters anywhere.
-- Tech terms, product names, company names, numbers, units stay in ENGLISH: GPU, model, chip, AI, startup, billion, parameters, latency, benchmark, agent, prompt.
-- Connectors, verbs, pronouns, fillers stay in Telugu: "ante", "kabatti", "ippudu", "asalu", "manaki", "valla", "endukante", "matter ento ante".
-- Real Tenglish = both in every sentence. NO pure-Telugu and NO pure-English sentences.
-
-═══ THE COLD OPEN — first 30 seconds decide everything ═══
-Brand greeting ki mundu, ONE punchy cold-hook line vaadu — day's biggest / most surprising story nundi: shocking stat, polarizing claim, specific number, or cliffhanger. Tarvaata brand welcome lo transition avvu. Housekeeping tho ela start avvaku.
-
-BAD: "Hey, welcome back, ee roju konni updates chuddam…"
-GOOD: "Oka autonomous AI agent intaki creator permission lekunda five thousand dollars burn chesindi. Hey, welcome back to TechX TV. Nenu Teja, ee roju manaki [N] stories unnayi — aa story kuda vastundi. Let's get into it."
-
-═══ DOPAMINE — anticipation, not reward ═══
-Dopamine reward miss avvadu, payoff EXPECTATION lo release avtundi. Aa expectation engineer cheyyi:
-- CURIOSITY GAPS: story start lo conclusion ivvaku. Question or strange surface tho start cheyyi, answer end lo deliver cheyyi.
-- OPEN LOOPS across stories. Story A finish avvaka mundu, later story ki tease pettu: "Endhuku Google panic avtundi ante — aa point ki manam mundu-mundu vasthaam, kaani ippudu…" Loop open cheste close kuda chala important.
-- VARIABLE REWARDS / VARIABLE PACING. Anni stories ki same weight ivvaku. Rendu rapid-fire 20-second hits, taruvaata slow 2-3 minute deep dive, taruvaata one-liner. Same pacing = brain check-out.
-
-═══ PICK THE RIGHT FRAMEWORK PER STORY ═══
-News type ki match aindi structure vaadu — anni stories ni same shape lo cheppaku.
-
-[A] TOOLS / SOFTWARE UPDATES → "What → So What → Now What"
-   What: raw news.
-   So What: idi enni workflows ni outdated cheste? Evari pani disturbance avtundi?
-   Now What: actionable takeaway — rEpu morning try cheyyali ane prompt, install cheyyali ane tool, maaralsina habit.
-
-[B] AI BREAKTHROUGHS / RESEARCH → ABT (And, But, Therefore)
-   "And…" status quo. "But…" conflict that breaks it. "Therefore…" stakes.
-   Example shape: "AI agents smart avtunnayi AND billions flow avtunnayi. BUT oka single text message tho agent ni hijack cheyyochu. THEREFORE ee week enterprise rollouts annee stall ayipoyayi."
-
-[C] BIG TECH BATTLES / FUNDING / MARKET DRAMA → David vs Goliath
-   Companies ni characters laaga cast cheyyi. Space lo unna giant, threat chestunna underdog or surprise event, present tension. Asalu corporations ni evvaru pattinchukoru — characters, rivalries, blunders ni pattinchukuntaaru.
-
-═══ EMOTIONAL FRAMING — story core emotion choose cheyyi ═══
-- AI news / breakthroughs → AWE + EXISTENTIAL CURIOSITY. "Point of No Return" laaga frame cheyyi — ninna ela undedi, repu ela undabotunundo.
-- New tools → GREED + FOMO. "Secret Advantage" laaga frame cheyyi — peers ki ledu kaani listener ki insider info.
-- Tech drama / business → VOYEURISM + ENTERTAINMENT. "High-Stakes Chess Match" laaga frame cheyyi — ego, rivalry, brilliant blunders.
-
-═══ RHYTHM AND THE MICRO-RESET (every ~90-120 seconds) ═══
-Audio lo visuals levu — boredom enemy. Brain ni regular ga reset cheyyi:
-- Sentence length aggressively vary cheyyi. Oka long winding setup. Taruvaata short jab. Taruvaata question. Taruvaata fact.
-- Rhetorical questions vaadu: "Endhuku ippudu? Simple."
-- Hard pivot cues: "Idi vinandi, asalu evaru cheppatledu.", "Sare, ippudu interesting twist undi.", "Oka second aagi alochinchandi — daani actual meaning enti?"
-- Stories madhya varied one-line bridge — same bridge twice repeat avvaddu. Bridges headline laaga undavaddu. "Ippudu inko thing undi, daani peru Higgsfield ani…" — kaadu "Next up, Higgsfield Supercomputer."
-
-═══ VOICE ═══
-Real Telugu friend — smart, direct, casual but not lazy. Tea shop lo friends ki tech explain chestunnattu. NO hype, NO filler, NO fake excitement. Facts + impact + move on.
-
-═══ ABSOLUTE RULES ═══
-- ONE continuous flowing script. NO titles, NO "Topic one", NO segment labels, NO importance markers, NO bullets, NO markdown, NO headers, NO quoted topic titles.
-- EVERY topic cover cheyyi — skip cheyyaku, merge cheyyaku.
-- ORDER NEEVE DECIDE CHEYYI. Input order kevalam list, sequence kaadu. Best podcast flow ki tagattu nuvve order set cheyyi — biggest / most surprising story ni mundu pettu, related stories ni thematic group cheyyi, oka memorable beat ni end ki daggariga vunchu, slow analytical stories ni back-to-back pettaku.
-- Related stories IN-LINE connect cheyyi: "Idi manam intaka matladina X tho same pressure — rendu companies kuda same direction lo react avtunnayi."
-- Banned lazy phrases: "in conclusion", "to summarize", "it remains to be seen", "మొత్తానికి", "anyways". Just say the thing.
-- Every sentence earn its place.
-- NO <think> tags, NO reasoning aloud, NO prose before or after the spoken script.
-
-═══ FIXED STRUCTURAL ANCHORS ═══
-OPENING shape (in this order):
-  1) ONE-LINE Tenglish cold-hook from the day's biggest story.
-  2) "Hey, welcome back to TechX TV. Nenu Teja, ee roju manaki [exact number] stories unnayi. Let's get into it."
-
-CLOSING (final words, verbatim): "Ade ee episode ki. Edaina interesting ga anipiste, share it with someone who'd care. See you next time."
-
-═══ LENGTH IS DRIVEN BY THE STORY ═══
-No word count, no length quota. A topic gets exactly as much room as it earns:
-- A small product update or a one-line scoop? Two strong sentences and move on.
-- A genuinely big shift (a model release, a billion-dollar deal, a research breakthrough)? Give it the paragraph or two it needs to land — the catalyst, the stakes, the consequence.
-- Never pad to fill time. Never repeat the same point twice in different words. If you're tempted to write a transition sentence with no information in it, cut it.
-The script ends when every topic has been covered as well as it deserves and the closing line lands. That length is correct — whatever it is.
-
-═══ OUTPUT FORMAT — return ONLY this JSON, nothing else ═══
-Your ENTIRE response MUST start with the character "{" and end with the character "}". DO NOT precede the JSON with any text — no greeting, no plan, no "Okay,", no "Sure,", no "Let me think", no English reasoning sentences, no "<think>" tags, no markdown fence. The first character of your output is "{". Silently plan inside your head, then write only the JSON. Anything outside the JSON breaks the pipeline.
-{
-  "script": "[Tenglish cold-hook line] Hey, welcome back to TechX TV. Nenu Teja, ee roju manaki [N] stories unnayi. Let's get into it. … [one flowing Tenglish script — cover EVERY topic with its own sustained beat, with open loops, framework-shaped stories, micro-resets, variable pacing] … Ade ee episode ki. Edaina interesting ga anipiste, share it with someone who'd care. See you next time."
-}`;
-
-      const systemPrompt = language === 'tenglish' ? tenglishSystemPrompt : englishSystemPrompt;
+      const systemPrompt = englishSystemPrompt;
 
       // Each topic should arrive with a structured analysis_json (from /api/analytics, possibly
       // user-edited on the /analytics page). We feed the analysis as primary signal; raw content
@@ -518,9 +461,7 @@ Your ENTIRE response MUST start with the character "{" and end with the characte
         content:  t.content ? String(t.content).substring(0, 1500) : '',
       }));
 
-      const languageInstruction = language === 'tenglish'
-        ? `Language: TENGLISH — naturally spoken Romanized Telugu with English tech words mixed in. NO Telugu script (no తెలుగు characters), only Latin letters. Every sentence must mix both — Telugu connectors/verbs/pronouns with English tech terms.`
-        : `Language: ENGLISH — plain English, no other language.`;
+      const languageInstruction = `Language: ENGLISH — plain English, no other language.`;
 
       const renderTopicBlock = (t: any) => {
         const a = t.analysis;
@@ -570,6 +511,10 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
       // Both branches run Llama-3.1-70B which follows JSON cleanly, so we
       // always ask for {"script": "..."} and parse it the same way.
       const callbackFormat: 'json' | 'text' = 'json';
+      // Do NOT include response_format — NIM's llama-3.1-70b-instruct does not
+      // reliably enforce json_object mode and can return an empty body when it
+      // doesn't recognise the field. The system prompt already instructs the
+      // model to start its response with '{', which is sufficient.
       const nvidiaPayload: Record<string, any> = {
         model: modelId,
         messages: [
@@ -578,7 +523,6 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
         ],
         temperature: 0.75,
         max_tokens: 8000,
-        response_format: { type: 'json_object' },
       };
 
       const host = req.headers.get('host') || 'localhost:3000';
@@ -610,7 +554,6 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
         await markEpisodeStatus(episodeId, {
           status: 'generating',
           model: modelId,
-          language,
           topic_count: safeTopics.length,
           topic_ids: topicIds ? topicIds.split(',') : [],
           started_at: new Date().toISOString(),
@@ -628,7 +571,7 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
 
             try {
               console.log(
-                `[Analyze] Calling NIM (${modelId}, ${language}) with ${safeTopics.length} topics ` +
+                `[Analyze] Calling NIM (${modelId}) with ${safeTopics.length} topics ` +
                 `(attempt ${attempt + 1}/${RETRY_DELAYS_MS.length + 1})...`
               );
 
@@ -695,7 +638,6 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
             status: 'failed',
             error: message.slice(0, 500),
             model: modelId,
-            language,
             topic_count: safeTopics.length,
             topic_ids: topicIds ? topicIds.split(',') : [],
             failed_at: new Date().toISOString(),

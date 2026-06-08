@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense, useRef } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Sparkles, Loader2, RefreshCw, Save, ArrowLeft, ArrowRight, AlertCircle,
@@ -57,13 +57,8 @@ function AnalyticsInner() {
   const router = useRouter();
   const params = useSearchParams();
   const episodeFromUrl = params.get("episode") || "";
-  const languageFromUrl = (params.get("lang") === "tenglish" ? "tenglish" : "english") as "english" | "tenglish";
 
-  // Episode metadata is editable on this page — pre-filled from the URL when
-  // the user arrives from Topic Discovery, otherwise empty so they can name
-  // the episode from here.
   const [episodeName, setEpisodeName] = useState(episodeFromUrl);
-  const [language, setLanguage] = useState<"english" | "tenglish">(languageFromUrl);
 
   const [rows, setRows] = useState<RowState[]>([]);
   const [pageStatus, setPageStatus] = useState<"loading" | "ready" | "no-topics">("loading");
@@ -73,11 +68,8 @@ function AnalyticsInner() {
   // Episodes that haven't produced a final script yet — listed below the topic
   // list so the user can jump straight into an in-progress / failed episode.
   const [resumeCandidates, setResumeCandidates] = useState<any[]>([]);
-  const ranInitial = useRef(false);
 
-  // Keep local state in sync if the URL changes (e.g., user clicks a resume link).
   useEffect(() => { setEpisodeName(episodeFromUrl); }, [episodeFromUrl]);
-  useEffect(() => { setLanguage(languageFromUrl); }, [languageFromUrl]);
 
   // Load the candidate topic list once on mount, regardless of episode name.
   useEffect(() => {
@@ -86,10 +78,8 @@ function AnalyticsInner() {
       setRows(candidates.map(t => ({
         topic: t,
         analysis: asAnalysis(t.analysis_json),
-        // Currently-selected topics are included by default; previously-analyzed
-        // pending topics are off by default — the user can opt them in.
         included: t.status === 'selected',
-        loading: !t.analysis_json,
+        loading: false,
         rerunning: false,
         saving: false,
         saved: false,
@@ -111,16 +101,6 @@ function AnalyticsInner() {
   const toggleIncluded = (id: string) => {
     setRows(prev => prev.map(r => r.topic.id === id ? { ...r, included: !r.included } : r));
   };
-
-  // Kick off analysis for any topic that doesn't have one yet (once per mount).
-  useEffect(() => {
-    if (pageStatus !== "ready" || ranInitial.current) return;
-    const missing = rows.filter(r => !r.topic.analysis_json).map(r => r.topic.id);
-    if (!missing.length) return;
-    ranInitial.current = true;
-    runAnalytics(missing, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageStatus]);
 
   const runAnalytics = useCallback(async (topicIds: string[], force: boolean) => {
     if (!topicIds.length) return;
@@ -144,6 +124,7 @@ function AnalyticsInner() {
         }
         return {
           ...r,
+          topic: { ...r.topic, analysis_json: result.analysis },
           loading: false,
           rerunning: false,
           analysis: asAnalysis(result.analysis),
@@ -206,7 +187,7 @@ function AnalyticsInner() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ episodeId: episodeName, topics: payloadTopics, language }),
+        body: JSON.stringify({ episodeId: episodeName, topics: payloadTopics }),
       });
       if (!res.ok) throw new Error("Failed to start script generation");
 
@@ -258,7 +239,14 @@ function AnalyticsInner() {
   const someError = rows.some(r => r.error);
   const includedCount = rows.filter(r => r.included).length;
   const hasReusable = rows.some(r => r.topic.status !== 'selected');
-  const canGenerate = !!episodeName.trim() && includedCount > 0 && allReady && !isGeneratingScript;
+  const unanalyzedIds = rows
+    .filter(r => !r.topic.analysis_json && !r.loading && !r.rerunning)
+    .map(r => r.topic.id);
+  const allIncludedHaveAnalysis = rows
+    .filter(r => r.included)
+    .every(r => !!r.topic.analysis_json);
+  const canAnalyze = unanalyzedIds.length > 0 && allReady;
+  const canGenerate = !!episodeName.trim() && includedCount > 0 && allReady && !isGeneratingScript && allIncludedHaveAnalysis;
 
   return (
     <div className="space-y-5 sm:space-y-6 animate-fade-up pb-36 sm:pb-32">
@@ -309,21 +297,6 @@ function AnalyticsInner() {
             placeholder="Episode name (e.g. Ep-01)"
             className="bg-transparent outline-none text-sm text-slate-200 placeholder-slate-600 px-3 py-1.5 flex-1 min-w-0"
           />
-          <div className="hidden sm:block w-px h-5 bg-white/10 shrink-0" />
-          <div className="flex items-center gap-0.5 bg-[#0c0c18] p-0.5 rounded-lg border border-white/[0.06] shrink-0" title="Script language">
-            {(["english", "tenglish"] as const).map(lang => (
-              <button
-                key={lang}
-                type="button"
-                onClick={() => setLanguage(lang)}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all capitalize ${
-                  language === lang ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"
-                }`}
-              >
-                {lang}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -366,7 +339,7 @@ function AnalyticsInner() {
             {!allReady ? (
               <span className="flex items-center gap-2 text-slate-400 text-xs sm:text-sm">
                 <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                Analysis still running…
+                {bulkStatus || "Analysis running…"}
               </span>
             ) : !episodeName.trim() ? (
               <span className="flex items-center gap-2 text-amber-300 text-xs sm:text-sm">
@@ -377,6 +350,11 @@ function AnalyticsInner() {
               <span className="flex items-center gap-2 text-amber-300 text-xs sm:text-sm">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 Pick at least one topic to include.
+              </span>
+            ) : !allIncludedHaveAnalysis ? (
+              <span className="flex items-center gap-2 text-amber-300 text-xs sm:text-sm">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                Analyze included topics first.
               </span>
             ) : (
               <span className="flex items-center gap-2 text-emerald-400 text-xs sm:text-sm">
@@ -391,15 +369,26 @@ function AnalyticsInner() {
               </span>
             )}
           </div>
-          <button
-            onClick={handleGenerateScript}
-            disabled={!canGenerate}
-            className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm px-4 sm:px-5 py-2.5 sm:py-2 rounded-xl font-semibold transition-all shadow-lg shadow-indigo-500/20 w-full sm:w-auto"
-          >
-            {isGeneratingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            {isGeneratingScript ? "Generating…" : `Generate Script${includedCount > 0 ? ` (${includedCount})` : ""}`}
-            {!isGeneratingScript && <ArrowRight className="w-3.5 h-3.5" />}
-          </button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {canAnalyze && (
+              <button
+                onClick={() => runAnalytics(unanalyzedIds, false)}
+                className="flex items-center justify-center gap-2 bg-white/[0.06] hover:bg-white/[0.1] text-slate-200 text-sm px-4 sm:px-4 py-2.5 sm:py-2 rounded-xl font-semibold transition-all border border-white/[0.08] flex-1 sm:flex-none"
+              >
+                <Sparkles className="w-4 h-4 text-indigo-400" />
+                Analyze Topics ({unanalyzedIds.length})
+              </button>
+            )}
+            <button
+              onClick={handleGenerateScript}
+              disabled={!canGenerate}
+              className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm px-4 sm:px-5 py-2.5 sm:py-2 rounded-xl font-semibold transition-all shadow-lg shadow-indigo-500/20 flex-1 sm:flex-none"
+            >
+              {isGeneratingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {isGeneratingScript ? "Generating…" : `Generate Script${includedCount > 0 ? ` (${includedCount})` : ""}`}
+              {!isGeneratingScript && <ArrowRight className="w-3.5 h-3.5" />}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -438,11 +427,10 @@ function EmptyState({
           </p>
           {resumeCandidates.map(ep => {
             const s = episodeStatus(ep);
-            const lang = ep.analysis_json?.language === "tenglish" ? "tenglish" : "english";
             return (
               <button
                 key={ep.id}
-                onClick={() => router.push(`/analytics?episode=${encodeURIComponent(ep.week_id)}&lang=${lang}`)}
+                onClick={() => router.push(`/analytics?episode=${encodeURIComponent(ep.week_id)}`)}
                 className="w-full flex items-center justify-between gap-3 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] rounded-xl px-4 py-3 text-left transition-colors"
               >
                 <div className="min-w-0">
@@ -478,6 +466,7 @@ function TopicAnalysisCard({
   const busy = loading || rerunning;
   const hasAnalysis = !!topic.analysis_json;
   const fromPriorSession = topic.status !== 'selected';
+  const isPending = !busy && !hasAnalysis && !error;
 
   return (
     <div className={`bg-[#13131f] border rounded-2xl overflow-hidden card-glow transition-colors ${
@@ -559,9 +548,14 @@ function TopicAnalysisCard({
             <div className="text-xs text-slate-500 mt-2">You can still edit the fields below manually.</div>
           </div>
         </div>
+      ) : isPending ? (
+        <div className="px-5 py-8 flex items-center justify-center gap-2.5 text-slate-600 text-sm border-t border-white/[0.04]">
+          <Circle className="w-4 h-4 shrink-0" />
+          Not yet analyzed — click <span className="text-slate-400 font-medium">Analyze Topics</span> to run
+        </div>
       ) : null}
 
-      {!busy && (
+      {!busy && hasAnalysis && (
         <div className="p-4 sm:p-5 space-y-4">
           <Field
             icon={<Lightbulb className="w-3.5 h-3.5" />}

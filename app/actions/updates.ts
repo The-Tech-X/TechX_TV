@@ -21,6 +21,15 @@ export async function getUpdates() {
   }
 }
 
+function currentWeekId(): string {
+  const now = new Date();
+  // ISO week: YYYY-Www
+  const jan4 = new Date(now.getFullYear(), 0, 4);
+  const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
+  const weekNum = Math.ceil((dayOfYear + jan4.getDay()) / 7);
+  return `${now.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
+
 export async function saveUpdate(topicData: {
   title: string;
   url?: string;
@@ -31,7 +40,7 @@ export async function saveUpdate(topicData: {
   try {
     const { data, error } = await supabase
       .from('updates')
-      .insert([topicData])
+      .insert([{ ...topicData, week_id: currentWeekId() }])
       .select()
       .single();
     if (error) throw error;

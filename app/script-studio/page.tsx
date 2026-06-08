@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { getEpisodes, updateEpisodeScript, getTopicsForEpisodeRetry } from "../actions/episodes";
+import { getEpisodes, updateEpisodeScript, getTopicsForEpisodeRetry, resetEpisode } from "../actions/episodes";
 import { getUpdatesByEpisode } from "../actions/updates";
 import { episodeStatus, episodeStatusLabel } from "../lib/episodeStatus";
 import {
   Headphones, Save, RefreshCw, Loader2, Mic, FileText,
   Volume2, CheckCircle2, Clock, AlignLeft, Link2, ListMusic, ChevronLeft,
-  AlertCircle, Sparkles, ArrowRight, Brain
+  AlertCircle, Sparkles, ArrowRight, Brain, RotateCcw
 } from "lucide-react";
 
 export default function ScriptStudioPage() {
@@ -24,6 +24,7 @@ export default function ScriptStudioPage() {
   const [episodeListOpen, setEpisodeListOpen] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [retryStatus, setRetryStatus] = useState("");
+  const [isResetting, setIsResetting] = useState(false);
 
   useEffect(() => { loadEpisodes(); }, []);
 
@@ -61,7 +62,7 @@ export default function ScriptStudioPage() {
     setIsRetrying(true);
     setRetryStatus("Fetching original topics…");
     try {
-      const { topics, language } = await getTopicsForEpisodeRetry(selectedEpisode.week_id);
+      const { topics } = await getTopicsForEpisodeRetry(selectedEpisode.week_id);
       if (!topics.length) {
         setRetryStatus("Couldn't find the source topics for this episode. Re-create it from Topic Discovery.");
         setTimeout(() => { setIsRetrying(false); setRetryStatus(""); }, 5000);
@@ -80,7 +81,7 @@ export default function ScriptStudioPage() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ episodeId: selectedEpisode.week_id, topics: payloadTopics, language }),
+        body: JSON.stringify({ episodeId: selectedEpisode.week_id, topics: payloadTopics }),
       });
       if (!res.ok) throw new Error("Failed to restart script generation");
 
@@ -113,6 +114,23 @@ export default function ScriptStudioPage() {
       setRetryStatus(`Error: ${e.message}`);
     } finally {
       setTimeout(() => setIsRetrying(false), 1500);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!selectedEpisode) return;
+    if (!confirm(`Reset "${selectedEpisode.week_id}"? This clears the script and sets all linked topics back to active so you can re-run analytics and regenerate.`)) return;
+    setIsResetting(true);
+    try {
+      await resetEpisode(selectedEpisode.week_id);
+      const eps = await getEpisodes();
+      setEpisodes(eps);
+      const refreshed = eps.find((e: any) => e.id === selectedEpisode.id);
+      if (refreshed) { setSelectedEpisode(refreshed); setScriptText(""); setLinkedTopics([]); }
+    } catch (e: any) {
+      alert("Reset failed: " + e.message);
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -300,6 +318,15 @@ export default function ScriptStudioPage() {
                   <span className="text-[11px] sm:text-xs text-indigo-300 animate-fade-in w-full sm:w-auto">{audioStatus}</span>
                 )}
                 <button
+                  onClick={handleReset}
+                  disabled={isResetting}
+                  title="Clear script and reset linked topics to active"
+                  className="flex items-center gap-1.5 bg-white/[0.05] hover:bg-red-500/20 hover:border-red-500/30 hover:text-red-300 disabled:opacity-50 text-slate-400 text-sm px-3 sm:px-3.5 py-2 sm:py-1.5 rounded-xl font-medium transition-all border border-white/[0.07]"
+                >
+                  {isResetting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                  <span className="hidden sm:inline">{isResetting ? "Resetting…" : "Reset"}</span>
+                </button>
+                <button
                   onClick={handleSave}
                   disabled={isSaving}
                   className="flex items-center gap-1.5 bg-white/[0.05] hover:bg-white/[0.09] active:bg-white/[0.13] text-slate-200 text-sm px-3 sm:px-3.5 py-2 sm:py-1.5 rounded-xl font-medium transition-all border border-white/[0.07] disabled:opacity-50"
@@ -362,7 +389,7 @@ export default function ScriptStudioPage() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <Link
-                      href={`/analytics?episode=${encodeURIComponent(selectedEpisode.week_id)}&lang=${selectedEpisode.analysis_json?.language === "tenglish" ? "tenglish" : "english"}`}
+                      href={`/analytics?episode=${encodeURIComponent(selectedEpisode.week_id)}`}
                       className="flex items-center gap-1.5 bg-white/[0.05] hover:bg-white/[0.09] text-slate-200 text-xs px-3 py-2 rounded-xl font-medium border border-white/[0.07] transition-all"
                     >
                       <Brain className="w-3.5 h-3.5" />

@@ -19,7 +19,6 @@ function EpisodeCard({ ep }: { ep: any }) {
   const estMin    = Math.max(1, Math.round(wordCount / 130));
   const preview   = ep.script_text ? ep.script_text.substring(0, 180).trim() + "…" : null;
   const errMsg    = ep.analysis_json?.error;
-  const lang      = ep.analysis_json?.language === "tenglish" ? "tenglish" : "english";
 
   const handleToggleTopics = async () => {
     if (!showTopics && linkedTopics.length === 0) {
@@ -73,7 +72,7 @@ function EpisodeCard({ ep }: { ep: any }) {
               <span className="line-clamp-3">{errMsg || "Script generation failed. Open Analytics to retry."}</span>
             </p>
             <Link
-              href={`/analytics?episode=${encodeURIComponent(ep.week_id)}&lang=${lang}`}
+              href={`/analytics?episode=${encodeURIComponent(ep.week_id)}`}
               className="inline-flex items-center gap-1.5 text-xs text-indigo-300 hover:text-indigo-200 transition-colors"
             >
               <Brain className="w-3 h-3" /> Open Analytics

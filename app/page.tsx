@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getUpdates, saveUpdate, toggleUpdateStatus } from "./actions/updates";
-import { Link2, Plus, Zap, Loader2, X, CheckCircle2, Circle, ExternalLink, ChevronRight, Brain, Trash2, RefreshCw, Languages, ArrowRight } from "lucide-react";
+import { Link2, Plus, Zap, Loader2, X, CheckCircle2, Circle, ExternalLink, ChevronRight, Brain, Trash2, RefreshCw, ArrowRight, AlertTriangle } from "lucide-react";
 import { deleteUpdate } from "./actions/updates";
 
 export default function TopicDiscoveryPage() {
@@ -11,12 +11,11 @@ export default function TopicDiscoveryPage() {
   const [updates, setUpdates] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [newUrl, setNewUrl] = useState("");
-  const [episodeName, setEpisodeName] = useState("");
   const [manualDescription, setManualDescription] = useState("");
   const [isScraping, setIsScraping] = useState(false);
   const [selectedTopicDetails, setSelectedTopicDetails] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState<"active" | "done">("active");
-  const [language, setLanguage] = useState<"english" | "tenglish">("english");
+  const [showAnalyticsConfirm, setShowAnalyticsConfirm] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
@@ -45,9 +44,13 @@ export default function TopicDiscoveryPage() {
   };
 
   const handleGoToAnalytics = () => {
-    if (!episodeName.trim() || selectedCount === 0) return;
-    const qs = new URLSearchParams({ episode: episodeName.trim(), lang: language });
-    router.push(`/analytics?${qs.toString()}`);
+    if (selectedCount === 0) return;
+    setShowAnalyticsConfirm(true);
+  };
+
+  const confirmGoToAnalytics = () => {
+    setShowAnalyticsConfirm(false);
+    router.push("/analytics");
   };
 
   const handleAddTopic = async () => {
@@ -95,58 +98,23 @@ export default function TopicDiscoveryPage() {
           <p className="text-slate-500 text-xs sm:text-sm mt-1">Add news articles, select what makes the cut, then run analytics to brief the script writer.</p>
         </div>
 
-        {/* Episode launch bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:flex-wrap gap-2 bg-[#13131f] border border-white/[0.07] rounded-2xl p-2 shadow-xl w-full lg:w-auto lg:shrink-0">
-          <input
-            type="text"
-            value={episodeName}
-            onChange={e => setEpisodeName(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleGoToAnalytics()}
-            placeholder="Episode name (e.g. Ep-01)"
-            className="bg-transparent outline-none text-sm text-slate-200 placeholder-slate-600 px-3 py-1.5 sm:py-0 w-full sm:w-44 min-w-0"
-          />
-          <div className="hidden sm:block w-px h-5 bg-white/10 shrink-0" />
-
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Language toggle */}
-            <div
-              className="flex items-center gap-0.5 bg-[#0c0c18] p-0.5 rounded-lg border border-white/[0.06] shrink-0"
-              title="Script language — both English and Tenglish run on Llama-3.1-70B"
-            >
-              <Languages className="w-3.5 h-3.5 text-slate-600 ml-1.5" />
-              {(["english", "tenglish"] as const).map(lang => (
-                <button
-                  key={lang}
-                  type="button"
-                  onClick={() => setLanguage(lang)}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all capitalize ${
-                    language === lang
-                      ? "bg-indigo-500 text-white shadow"
-                      : "text-slate-500 hover:text-slate-300"
-                  }`}
-                >
-                  {lang}
-                </button>
-              ))}
-            </div>
-
-            {selectedCount > 0 && (
-              <span className="text-[11px] sm:text-xs font-semibold text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-lg whitespace-nowrap border border-indigo-500/15">
-                {selectedCount} selected
-              </span>
-            )}
-
-            <button
-              onClick={handleGoToAnalytics}
-              disabled={!episodeName.trim() || selectedCount === 0}
-              title="Run Tavily web search + Mistral Large analysis on selected topics"
-              className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:shadow-none text-white text-sm px-4 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-indigo-500/20 whitespace-nowrap ml-auto sm:ml-0 flex-1 sm:flex-none"
-            >
-              <Brain className="w-3.5 h-3.5" />
-              Analyze Topics
-              <ArrowRight className="w-3.5 h-3.5 opacity-80" />
-            </button>
-          </div>
+        {/* Analytics launch bar */}
+        <div className="flex items-center gap-2 bg-[#13131f] border border-white/[0.07] rounded-2xl p-2 shadow-xl w-full lg:w-auto lg:shrink-0">
+          {selectedCount > 0 && (
+            <span className="text-[11px] sm:text-xs font-semibold text-indigo-400 bg-indigo-500/10 px-2.5 py-1.5 rounded-lg whitespace-nowrap border border-indigo-500/15">
+              {selectedCount} selected
+            </span>
+          )}
+          <button
+            onClick={handleGoToAnalytics}
+            disabled={selectedCount === 0}
+            title="Run Tavily web search + Mistral Large analysis on selected topics"
+            className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:shadow-none text-white text-sm px-4 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-indigo-500/20 whitespace-nowrap ml-auto"
+          >
+            <Brain className="w-3.5 h-3.5" />
+            Run Analytics
+            <ArrowRight className="w-3.5 h-3.5 opacity-80" />
+          </button>
         </div>
       </div>
 
@@ -362,6 +330,49 @@ export default function TopicDiscoveryPage() {
             </div>
             <div className="flex-1 px-4 sm:px-6 py-5 sm:py-6 text-slate-300 text-sm leading-relaxed whitespace-pre-wrap pb-[calc(env(safe-area-inset-bottom)+1rem)]">
               {selectedTopicDetails.content || "No content available."}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Run Analytics confirmation modal */}
+      {showAnalyticsConfirm && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center px-4 animate-fade-in"
+          style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}
+          onClick={() => setShowAnalyticsConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-[#13131f] border border-white/[0.1] rounded-2xl p-6 shadow-2xl space-y-4 animate-fade-up"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/25 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-white font-semibold text-sm">Weekly news ready?</h3>
+                <p className="text-slate-400 text-xs mt-1 leading-relaxed">
+                  You have <span className="text-white font-medium">{selectedCount} topic{selectedCount !== 1 ? "s" : ""}</span> selected.
+                  For the best social scoring, run analytics when you have collected <span className="text-white font-medium">all your topics for the week</span> — the AI ranks them against each other.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={() => setShowAnalyticsConfirm(false)}
+                className="flex-1 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.07] transition-all"
+              >
+                Not yet
+              </button>
+              <button
+                onClick={confirmGoToAnalytics}
+                className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20"
+              >
+                <Brain className="w-3.5 h-3.5" />
+                Yes, run analytics
+              </button>
             </div>
           </div>
         </div>
