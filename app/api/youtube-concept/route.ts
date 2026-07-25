@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getStageConfig } from '../../lib/settings';
+import { callChatModel, parseModelJson } from '../../lib/aiProvider';
 
 export const maxDuration = 180;
 export const runtime = 'nodejs';
@@ -8,9 +10,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
   process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 );
-
-const NIM_URL       = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const MISTRAL_MODEL = 'mistralai/mistral-large-3-675b-instruct-2512';
 
 const CONCEPT_SYSTEM_PROMPT = `You are a YouTube content strategist for TechX TV, a tech creator channel hosted by Teja.
 
@@ -59,8 +58,10 @@ export async function POST(req: Request) {
     if (!dateFrom || !dateTo) {
       return NextResponse.json({ error: 'dateFrom and dateTo are required' }, { status: 400 });
     }
-    if (!process.env.NVIDIA_API_KEY) {
-      return NextResponse.json({ error: 'NVIDIA_API_KEY missing' }, { status: 500 });
+
+    const config = await getStageConfig('youtube_concept');
+    if (!config.apiKey) {
+      return NextResponse.json({ error: `No ${config.provider} API key saved — add one in Settings.` }, { status: 500 });
     }
 
     // Fetch all analyzed updates in the date range
@@ -95,38 +96,21 @@ ${topicList}
 
 Return the concept JSON. Use exact UUIDs from the input for best_single.update_id.`;
 
-    const res = await fetch(NIM_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.NVIDIA_API_KEY}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({
-        model: MISTRAL_MODEL,
-        messages: [
-          { role: 'system', content: CONCEPT_SYSTEM_PROMPT },
-          { role: 'user',   content: userPrompt },
-        ],
-        temperature: 0.5,
-        max_tokens: 2500,
-      }),
+    const raw = await callChatModel({
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model,
+      systemPrompt: CONCEPT_SYSTEM_PROMPT,
+      userPrompt,
+      maxTokens: 3000,
+      temperature: 0.5,
     });
-
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      throw new Error(`NIM ${res.status}: ${(data.error?.message || JSON.stringify(data)).slice(0, 200)}`);
-    }
-
-    let raw: string = data.choices?.[0]?.message?.content ?? '';
-    raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-    const match = raw.match(/\{[\s\S]*\}/);
-    const jsonStr = match ? match[0] : raw;
 
     let conceptJson: any;
     try {
-      conceptJson = JSON.parse(jsonStr);
+      conceptJson = parseModelJson(raw);
     } catch {
+      console.error(`[YouTubeConcept] ${config.provider}/${config.model} returned unparseable JSON:`, raw.slice(0, 300));
       throw new Error('Failed to parse concept JSON from model');
     }
 

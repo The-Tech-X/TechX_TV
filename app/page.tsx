@@ -2,379 +2,130 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getUpdates, saveUpdate, toggleUpdateStatus } from "./actions/updates";
-import { Link2, Plus, Zap, Loader2, X, CheckCircle2, Circle, ExternalLink, ChevronRight, Brain, Trash2, RefreshCw, ArrowRight, AlertTriangle } from "lucide-react";
-import { deleteUpdate } from "./actions/updates";
+import { getDashboardTopics, type DashboardTopic } from "./actions/dashboard";
+import { Loader2, Plus, ChevronRight, LayoutGrid } from "lucide-react";
 
-export default function TopicDiscoveryPage() {
-  const router = useRouter();
-  const [updates, setUpdates] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [newUrl, setNewUrl] = useState("");
-  const [manualDescription, setManualDescription] = useState("");
-  const [isScraping, setIsScraping] = useState(false);
-  const [selectedTopicDetails, setSelectedTopicDetails] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<"active" | "done">("active");
-  const [showAnalyticsConfirm, setShowAnalyticsConfirm] = useState(false);
-
-  useEffect(() => { loadData(); }, []);
-
-  async function loadData() {
-    setIsLoading(true);
-    setUpdates(await getUpdates());
-    setIsLoading(false);
-  }
-
-  const filteredUpdates = updates.filter(u =>
-    activeTab === "active" ? u.status !== "done" : u.status === "done"
+function StatusChip({ label, done, title }: { label: string; done: boolean; title: string }) {
+  return (
+    <span
+      title={title}
+      className={`min-w-[22px] h-5 px-1 flex items-center justify-center rounded text-[9px] font-bold border ${
+        done
+          ? "bg-emerald-500/15 text-emerald-600 border-emerald-500/25"
+          : "bg-black/[0.02] text-neutral-400 border-black/[0.07]"
+      }`}
+    >
+      {label}
+    </span>
   );
-  const selectedCount = updates.filter(u => u.status === "selected").length;
+}
 
-  const handleSelect = async (id: string, current: string) => {
-    const next = current === "selected" ? "pending" : "selected";
-    setUpdates(prev => prev.map(u => u.id === id ? { ...u, status: next } : u));
-    try { await toggleUpdateStatus(id, next); }
-    catch { setUpdates(prev => prev.map(u => u.id === id ? { ...u, status: current } : u)); }
-  };
-
-  const handleDelete = async (id: string) => {
-    setUpdates(prev => prev.filter(u => u.id !== id));
-    try { await deleteUpdate(id); }
-    catch { await loadData(); }
-  };
-
-  const handleGoToAnalytics = () => {
-    if (selectedCount === 0) return;
-    setShowAnalyticsConfirm(true);
-  };
-
-  const confirmGoToAnalytics = () => {
-    setShowAnalyticsConfirm(false);
-    router.push("/analytics");
-  };
-
-  const handleAddTopic = async () => {
-    if (!newUrl.trim()) return;
-
-    if (!newUrl.startsWith("http://") && !newUrl.startsWith("https://")) {
-      const saved = await saveUpdate({
-        title: newUrl,
-        source: "Manual Entry",
-        status: "selected",
-        content: manualDescription || "No description provided.",
-      });
-      setUpdates(prev => [saved, ...prev]);
-      setNewUrl(""); setManualDescription("");
-      return;
-    }
-
-    setIsScraping(true);
-    try {
-      const res = await fetch("/api/scrape", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: newUrl }),
-      });
-      if (!res.ok) throw new Error("Scrape failed");
-      const data = await res.json();
-      const saved = await saveUpdate({ title: data.title, source: data.source, url: data.url, status: "selected", content: data.content });
-      setUpdates(prev => [saved, ...prev]);
-      setNewUrl(""); setManualDescription("");
-    } catch {
-      const saved = await saveUpdate({ title: newUrl, source: "Manual (fallback)", status: "selected", content: manualDescription || "" });
-      setUpdates(prev => [saved, ...prev]);
-      setNewUrl(""); setManualDescription("");
-    } finally {
-      setIsScraping(false);
-    }
-  };
+function DashboardTopicCard({ topic }: { topic: DashboardTopic }) {
+  const router = useRouter();
+  const hasBrief = !!topic.analysis_json;
+  const has = (p: string) => topic.platforms.includes(p);
+  const scoreLabel =
+    topic.recommended_platform === "instagram" ? "Reel" :
+    topic.recommended_platform === "youtube"   ? "Video" : "No pick";
 
   return (
-    <div className="space-y-5 sm:space-y-6 animate-fade-up">
-      {/* Page header */}
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-white">Topic Discovery</h1>
-          <p className="text-slate-500 text-xs sm:text-sm mt-1">Add news articles, select what makes the cut, then run analytics to brief the script writer.</p>
-        </div>
-
-        {/* Analytics launch bar */}
-        <div className="flex items-center gap-2 bg-[#13131f] border border-white/[0.07] rounded-2xl p-2 shadow-xl w-full lg:w-auto lg:shrink-0">
-          {selectedCount > 0 && (
-            <span className="text-[11px] sm:text-xs font-semibold text-indigo-400 bg-indigo-500/10 px-2.5 py-1.5 rounded-lg whitespace-nowrap border border-indigo-500/15">
-              {selectedCount} selected
-            </span>
-          )}
-          <button
-            onClick={handleGoToAnalytics}
-            disabled={selectedCount === 0}
-            title="Run Tavily web search + Mistral Large analysis on selected topics"
-            className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:shadow-none text-white text-sm px-4 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-indigo-500/20 whitespace-nowrap ml-auto"
-          >
-            <Brain className="w-3.5 h-3.5" />
-            Run Analytics
-            <ArrowRight className="w-3.5 h-3.5 opacity-80" />
-          </button>
-        </div>
+    <div
+      onClick={() => router.push(`/topics/${topic.id}`)}
+      className="bg-white border border-black/[0.08] rounded-2xl p-4 cursor-pointer hover:bg-black/[0.02] transition-all group card-glow"
+    >
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <h3 className="text-sm font-medium text-neutral-900 leading-snug line-clamp-2 group-hover:text-red-600 transition-colors">
+          {topic.title}
+        </h3>
+        <ChevronRight className="w-4 h-4 text-neutral-300 group-hover:text-neutral-500 shrink-0 mt-0.5" />
       </div>
+      <p className="text-[11px] text-neutral-400 mb-3 truncate">{topic.source ?? "Unknown source"}</p>
 
-      {/* Add topic */}
-      <div className="bg-[#13131f] border border-white/[0.06] rounded-2xl p-4 sm:p-5 card-glow">
-        <h2 className="text-sm font-semibold text-slate-300 mb-3 sm:mb-4 flex items-center gap-2">
-          <Plus className="w-4 h-4 text-indigo-400" />
-          Add Topic or URL
-        </h2>
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 sm:gap-3 bg-[#0c0c18] border border-white/[0.06] rounded-xl px-3 sm:px-4 focus-within:border-indigo-500/40 transition-colors">
-            <Link2 className="w-4 h-4 text-slate-600 shrink-0" />
-            <input
-              type="text"
-              value={newUrl}
-              onChange={e => setNewUrl(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleAddTopic()}
-              placeholder="Paste a URL or type a topic title..."
-              className="flex-1 min-w-0 bg-transparent py-3 text-sm text-slate-200 placeholder-slate-600 outline-none"
-            />
-            {newUrl && (
-              <button onClick={() => setNewUrl("")} className="text-slate-600 hover:text-slate-400 p-1 -mr-1">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <textarea
-              value={manualDescription}
-              onChange={e => setManualDescription(e.target.value)}
-              placeholder="Optional: paste article content or description for better AI analysis..."
-              rows={2}
-              className="flex-1 bg-[#0c0c18] border border-white/[0.06] rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 outline-none resize-none focus:border-indigo-500/40 transition-colors"
-            />
-            <button
-              onClick={handleAddTopic}
-              disabled={isScraping || !newUrl.trim()}
-              className="flex sm:flex-col items-center justify-center gap-2 sm:gap-1 bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] disabled:opacity-40 text-slate-300 hover:text-white px-5 py-3 sm:py-0 rounded-xl border border-white/[0.06] sm:min-w-[80px] transition-all"
-            >
-              {isScraping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              <span className="text-xs font-medium">{isScraping ? "Fetching..." : "Add Topic"}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Topics list */}
-      <div className="bg-[#13131f] border border-white/[0.06] rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between gap-3 px-3 sm:px-5 py-3 sm:py-3.5 border-b border-white/[0.06] bg-white/[0.01]">
-          <div className="flex items-center gap-2 min-w-0 flex-wrap">
-            <div className="flex items-center gap-1 bg-[#0c0c18] p-1 rounded-xl border border-white/[0.06]">
-              {(["active", "done"] as const).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all capitalize ${
-                    activeTab === tab ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-slate-500 hover:text-slate-300"
-                  }`}
-                >
-                  {tab === "active" ? "Active" : "Done"}
-                  <span className={`ml-1.5 tabular-nums ${activeTab === tab ? "opacity-80" : "opacity-40"}`}>
-                    {updates.filter(u => tab === "active" ? u.status !== "done" : u.status === "done").length}
-                  </span>
-                </button>
-              ))}
-            </div>
-            {selectedCount > 0 && activeTab === "active" && (
-              <span className="hidden sm:inline text-xs text-slate-500">
-                {selectedCount} of {updates.filter(u => u.status !== "done").length} selected
-              </span>
-            )}
-          </div>
-          <button
-            onClick={loadData}
-            aria-label="Refresh"
-            className="p-2 rounded-lg hover:bg-white/[0.05] active:bg-white/[0.08] text-slate-600 hover:text-slate-400 transition-colors shrink-0"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
-          </button>
-        </div>
-
-        <div className="divide-y divide-white/[0.04]">
-          {filteredUpdates.length === 0 && !isLoading && (
-            <div className="py-16 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center mx-auto mb-3">
-                <Zap className="w-5 h-5 text-slate-700" />
-              </div>
-              <p className="text-slate-500 text-sm">
-                {activeTab === "active" ? "No topics yet. Add one above to get started!" : "No processed topics yet."}
-              </p>
-            </div>
-          )}
-          {isLoading && (
-            <div className="py-10 flex justify-center">
-              <Loader2 className="w-5 h-5 text-slate-600 animate-spin" />
-            </div>
-          )}
-          {filteredUpdates.map((update, i) => (
-            <div
-              key={update.id}
-              className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 sm:py-3.5 hover:bg-white/[0.02] active:bg-white/[0.03] transition-colors group animate-fade-up"
-              style={{ animationDelay: `${i * 25}ms` }}
-            >
-              {/* Select toggle — only on active */}
-              {activeTab === "active" ? (
-                <button
-                  onClick={() => handleSelect(update.id, update.status)}
-                  aria-label={update.status === "selected" ? "Deselect topic" : "Select topic"}
-                  className="shrink-0 p-1 -m-1 hover:scale-110 transition-transform"
-                >
-                  {update.status === "selected"
-                    ? <CheckCircle2 className="w-5 h-5 text-indigo-400" />
-                    : <Circle className="w-5 h-5 text-slate-700 hover:text-slate-500" />
-                  }
-                </button>
-              ) : (
-                <CheckCircle2 className="w-5 h-5 text-emerald-500/60 shrink-0" />
-              )}
-
-              {/* Title + source */}
-              <div
-                className="flex-1 min-w-0 cursor-pointer py-0.5"
-                onClick={() => setSelectedTopicDetails(update)}
-              >
-                <p className={`text-sm font-medium leading-snug line-clamp-2 sm:truncate transition-colors group-hover:text-indigo-300 ${
-                  update.status === "selected" ? "text-white" : "text-slate-300"
-                }`}>
-                  {update.title}
-                </p>
-                <p className="text-[11px] sm:text-xs text-slate-600 mt-0.5 truncate">{update.source}</p>
-              </div>
-
-              {/* Right side badges + actions */}
-              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                {update.episode_id && (
-                  <span className="hidden sm:inline text-[10px] text-slate-600 bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.05]">
-                    linked
-                  </span>
-                )}
-                {update.analysis_json && update.status !== "done" && (
-                  <span
-                    title="A research brief has been generated for this topic — it can be sent straight to the script writer from Analytics."
-                    className="px-1.5 sm:px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 text-[10px] sm:text-[11px] font-semibold border border-emerald-500/20 flex items-center gap-1"
-                  >
-                    <Brain className="w-2.5 h-2.5" />
-                    Analyzed
-                  </span>
-                )}
-                {update.status === "selected" && (
-                  <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 text-[10px] sm:text-[11px] font-semibold border border-indigo-500/15">
-                    Selected
-                  </span>
-                )}
-                <ChevronRight className="hidden sm:block w-4 h-4 text-slate-700 group-hover:text-slate-500 transition-colors" />
-                <button
-                  onClick={e => { e.stopPropagation(); handleDelete(update.id); }}
-                  aria-label="Delete topic"
-                  className="p-2 -mr-1 rounded-lg sm:opacity-0 sm:group-hover:opacity-100 hover:bg-red-500/10 active:bg-red-500/15 text-slate-600 hover:text-red-400 transition-all"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Detail drawer */}
-      {selectedTopicDetails && (
-        <div
-          className="fixed inset-0 z-[60] flex justify-end animate-fade-in"
-          style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
-          onClick={() => setSelectedTopicDetails(null)}
-        >
-          <div
-            className="w-full sm:max-w-lg bg-[#0f0f1a] sm:border-l border-white/[0.08] h-full overflow-y-auto flex flex-col animate-slide-right"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="sticky top-0 bg-[#0f0f1a]/95 backdrop-blur-md border-b border-white/[0.07] px-4 sm:px-6 py-4 sm:py-5 z-10">
-              <div className="flex items-start justify-between gap-3 sm:gap-4">
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-sm sm:text-base font-semibold text-white leading-snug pr-2">{selectedTopicDetails.title}</h2>
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
-                    <span className="text-[11px] sm:text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-medium">
-                      {selectedTopicDetails.source}
-                    </span>
-                    {selectedTopicDetails.url && (
-                      <a
-                        href={selectedTopicDetails.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-[11px] sm:text-xs text-slate-500 hover:text-slate-300 transition-colors"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        View original
-                      </a>
-                    )}
-                    {selectedTopicDetails.episode_id && (
-                      <span className="text-[11px] sm:text-xs text-slate-500 bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06]">
-                        Episode linked
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setSelectedTopicDetails(null)}
-                  aria-label="Close"
-                  className="p-2 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] active:bg-white/[0.15] text-slate-400 hover:text-white transition-colors shrink-0"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 px-4 sm:px-6 py-5 sm:py-6 text-slate-300 text-sm leading-relaxed whitespace-pre-wrap pb-[calc(env(safe-area-inset-bottom)+1rem)]">
-              {selectedTopicDetails.content || "No content available."}
-            </div>
-          </div>
+      {topic.social_score != null && (
+        <div className="mb-3">
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-red-500/10 text-red-600 border border-red-500/20">
+            {scoreLabel} · {Number(topic.social_score).toFixed(1)}
+          </span>
         </div>
       )}
 
-      {/* Run Analytics confirmation modal */}
-      {showAnalyticsConfirm && (
-        <div
-          className="fixed inset-0 z-[70] flex items-center justify-center px-4 animate-fade-in"
-          style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)" }}
-          onClick={() => setShowAnalyticsConfirm(false)}
-        >
-          <div
-            className="w-full max-w-sm bg-[#13131f] border border-white/[0.1] rounded-2xl p-6 shadow-2xl space-y-4 animate-fade-up"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/25 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-4 h-4 text-amber-400" />
-              </div>
-              <div>
-                <h3 className="text-white font-semibold text-sm">Weekly news ready?</h3>
-                <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                  You have <span className="text-white font-medium">{selectedCount} topic{selectedCount !== 1 ? "s" : ""}</span> selected.
-                  For the best social scoring, run analytics when you have collected <span className="text-white font-medium">all your topics for the week</span> — the AI ranks them against each other.
-                </p>
-              </div>
-            </div>
+      <div className="flex items-center gap-1 flex-wrap">
+        <StatusChip label="BR" done={hasBrief} title="Research brief" />
+        <StatusChip label="RL" done={has("instagram")} title="Instagram Reel" />
+        <StatusChip label="VD" done={has("youtube")} title="YouTube Video" />
+        <StatusChip label="LI" done={has("linkedin")} title="LinkedIn post" />
+        <StatusChip label="WA" done={has("whatsapp")} title="WhatsApp update" />
+        <StatusChip label="X"  done={has("x")} title="X post" />
+        <StatusChip label="PC" done={!!topic.episode_id} title="Included in a podcast episode" />
+      </div>
+    </div>
+  );
+}
 
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                onClick={() => setShowAnalyticsConfirm(false)}
-                className="flex-1 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.07] transition-all"
-              >
-                Not yet
-              </button>
-              <button
-                onClick={confirmGoToAnalytics}
-                className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20"
-              >
-                <Brain className="w-3.5 h-3.5" />
-                Yes, run analytics
-              </button>
-            </div>
+export default function DashboardPage() {
+  const router = useRouter();
+  const [topics, setTopics] = useState<DashboardTopic[]>([]);
+  const [scope, setScope] = useState<"week" | "all">("all");
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => { load(scope); }, [scope]);
+
+  async function load(nextScope: "week" | "all") {
+    setIsLoading(true);
+    setTopics(await getDashboardTopics(nextScope));
+    setIsLoading(false);
+  }
+
+  return (
+    <div className="space-y-5 sm:space-y-6 animate-fade-up">
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-black">Dashboard</h1>
+          <p className="text-neutral-500 text-xs sm:text-sm mt-1">Every topic, every output, one view.</p>
+        </div>
+        <button
+          onClick={() => router.push("/discover")}
+          className="flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-500 text-white text-sm px-4 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-red-500/20 whitespace-nowrap"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add Topics
+        </button>
+      </div>
+
+      <div className="flex items-center gap-1 bg-[#f5f5f5] p-1 rounded-xl border border-black/[0.08] w-fit">
+        {(["week", "all"] as const).map(s => (
+          <button
+            key={s}
+            onClick={() => setScope(s)}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              scope === s ? "bg-red-600 text-white shadow-lg shadow-red-500/20" : "text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            {s === "week" ? "This week" : "All weeks"}
+          </button>
+        ))}
+      </div>
+
+      {isLoading && (
+        <div className="py-16 flex justify-center">
+          <Loader2 className="w-5 h-5 text-neutral-400 animate-spin" />
+        </div>
+      )}
+
+      {!isLoading && topics.length === 0 && (
+        <div className="bg-white border border-black/[0.08] rounded-2xl py-16 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-black/[0.03] border border-black/[0.08] flex items-center justify-center mx-auto mb-3">
+            <LayoutGrid className="w-5 h-5 text-neutral-300" />
           </div>
+          <p className="text-neutral-500 text-sm">
+            {scope === "week" ? "No topics for this week yet." : "No topics yet."} Add one to get started.
+          </p>
+        </div>
+      )}
+
+      {!isLoading && topics.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {topics.map(topic => <DashboardTopicCard key={topic.id} topic={topic} />)}
         </div>
       )}
     </div>

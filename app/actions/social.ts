@@ -43,6 +43,23 @@ export async function getAllAnalyzedUpdateIds(): Promise<string[]> {
   return (data || []).map((u: any) => u.id);
 }
 
+/** All generated platform content for one topic — used by the per-topic
+ * workspace (/topics/[id]) to pre-fill Quick Post / Reel / Video cards with
+ * whatever's already been generated, instead of starting blank every visit. */
+export async function getSocialScriptsForUpdate(updateId: string) {
+  const { data, error } = await supabase
+    .from("social_scripts")
+    .select("platform, script_json, note, updated_at")
+    .eq("update_id", updateId)
+    .eq("status", "done");
+
+  if (error) {
+    console.error("[Social] getSocialScriptsForUpdate error:", error);
+    return [];
+  }
+  return data || [];
+}
+
 export async function getYoutubeConcepts() {
   const { data, error } = await supabase
     .from("youtube_concepts")

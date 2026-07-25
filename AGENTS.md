@@ -30,7 +30,7 @@ Tuesday evening:
       → topics load in "pending" state (NO auto-trigger)
       → click "Analyze Topics (N)" in sticky bar
           → /api/analytics:
-              Phase 1: Tavily web search + Mistral Large brief per topic (parallel)
+              Phase 1: Firecrawl web search + Mistral Large brief per topic (parallel)
                        saves: analysis_json {summary, whyNow, keyFacts[], biggerPicture, honestTake, sources}
               Phase 2: one batch Mistral call sees ALL topics together
                        saves: social_score, recommended_platform, social_reasoning per topic
@@ -62,9 +62,9 @@ ARCHIVE
 | Layer | Choice |
 |---|---|
 | Framework | Next.js 16 (App Router, Turbopack), React 19, TypeScript 5 |
-| Styling | Tailwind v4, Lucide icons, dark theme |
+| Styling | Tailwind v4, Lucide icons, white/black/red light theme |
 | DB + Storage | Supabase (Postgres + `audio` storage bucket) |
-| Web search | Tavily (`search_depth: advanced`, 6 results, includes answer) |
+| Web search | Firecrawl (`/v2/search`, 6 results, markdown content per result) |
 | Analyst LLM | `mistralai/mistral-large-3-675b-instruct-2512` via NVIDIA NIM |
 | Script writer | `meta/llama-3.1-70b-instruct` via NVIDIA NIM |
 | Social scripts | `mistralai/mistral-large-3-675b-instruct-2512` via NVIDIA NIM |
@@ -92,7 +92,7 @@ app/
     social.ts               getScoredUpdates + saveOverride + getAllAnalyzedUpdateIds
   api/
     scrape/route.ts         URL → Readability → {title, source, url, content}
-    analytics/route.ts      Phase1: topicIds[] → Tavily+Mistral → analysis_json (parallel)
+    analytics/route.ts      Phase1: topicIds[] → Firecrawl+Mistral → analysis_json (parallel)
                             Phase2: all topics → Mistral → social_score, recommended_platform, social_reasoning
     analyze/route.ts        topics+briefs → Llama-70B → episodes.script_text (fire-and-forget + self-callback)
     tts/route.ts            text → Edge TTS → upload mp3 → episodes.audio_url
@@ -248,7 +248,7 @@ Localhost/private IP detection forces inline even if token is set. QStash is not
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `NVIDIA_API_KEY`
-- `TAVILY_API_KEY`
+- `FIRECRAWL_API_KEY`
 
 **For production (Render):**
 - `QSTASH_URL`

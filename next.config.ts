@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  async redirects() {
+    return [
+      { source: "/script-studio", destination: "/podcast", permanent: false },
+      { source: "/social", destination: "/productions", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

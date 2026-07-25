@@ -29,10 +29,10 @@ function EpisodeCard({ ep }: { ep: any }) {
   };
 
   return (
-    <div className="bg-[#13131f] border border-white/[0.06] rounded-2xl flex flex-col card-glow overflow-hidden h-full">
+    <div className="bg-white border border-black/[0.08] rounded-2xl flex flex-col card-glow overflow-hidden h-full">
       {/* Header */}
-      <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-white/[0.05] flex items-center justify-between gap-2 bg-white/[0.01]">
-        <span className="text-xs font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-lg truncate max-w-[55%]">
+      <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-black/[0.07] flex items-center justify-between gap-2 bg-black/[0.01]">
+        <span className="text-xs font-bold text-red-600 bg-red-500/10 border border-red-500/20 px-2.5 py-1 rounded-lg truncate max-w-[55%]">
           {ep.week_id}
         </span>
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
@@ -54,7 +54,7 @@ function EpisodeCard({ ep }: { ep: any }) {
               <span className="hidden xs:inline sm:inline">Audio ready</span>
             </span>
           )}
-          <span className="flex items-center gap-1 text-slate-600 text-[11px] whitespace-nowrap">
+          <span className="flex items-center gap-1 text-neutral-400 text-[11px] whitespace-nowrap">
             <Calendar className="w-3 h-3" />
             {new Date(ep.created_at).toLocaleDateString()}
           </span>
@@ -64,28 +64,28 @@ function EpisodeCard({ ep }: { ep: any }) {
       {/* Script preview */}
       <div className="px-4 sm:px-5 py-3.5 sm:py-4 flex-1">
         {preview ? (
-          <p className="text-slate-400 text-sm leading-relaxed line-clamp-4">{preview}</p>
+          <p className="text-neutral-600 text-sm leading-relaxed line-clamp-4">{preview}</p>
         ) : status === "failed" ? (
           <div className="space-y-2">
-            <p className="text-red-300 text-sm flex items-start gap-2">
+            <p className="text-red-600 text-sm flex items-start gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span className="line-clamp-3">{errMsg || "Script generation failed. Open Analytics to retry."}</span>
             </p>
             <Link
               href={`/analytics?episode=${encodeURIComponent(ep.week_id)}`}
-              className="inline-flex items-center gap-1.5 text-xs text-indigo-300 hover:text-indigo-200 transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs text-red-600 hover:text-red-700 transition-colors"
             >
               <Brain className="w-3 h-3" /> Open Analytics
               <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
         ) : status === "generating" ? (
-          <p className="text-amber-300/90 text-sm italic flex items-center gap-2">
+          <p className="text-amber-600/90 text-sm italic flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin" />
             Script generation in progress — refresh in a minute.
           </p>
         ) : (
-          <p className="text-slate-600 text-sm italic flex items-center gap-2">
+          <p className="text-neutral-400 text-sm italic flex items-center gap-2">
             <FileText className="w-4 h-4" />
             No script generated yet.
           </p>
@@ -94,12 +94,12 @@ function EpisodeCard({ ep }: { ep: any }) {
 
       {/* Stats */}
       {wordCount > 0 && (
-        <div className="px-4 sm:px-5 py-2.5 border-t border-white/[0.04] flex items-center gap-3 sm:gap-4 text-[11px] text-slate-600 bg-white/[0.01] flex-wrap">
+        <div className="px-4 sm:px-5 py-2.5 border-t border-black/[0.06] flex items-center gap-3 sm:gap-4 text-[11px] text-neutral-400 bg-black/[0.01] flex-wrap">
           <span>{wordCount.toLocaleString()} words</span>
           <span className="flex items-center gap-1"><Clock className="w-3 h-3" />~{estMin} min</span>
           <button
             onClick={handleToggleTopics}
-            className="flex items-center gap-1 ml-auto text-slate-600 hover:text-slate-400 active:text-slate-300 transition-colors py-1 -my-1"
+            className="flex items-center gap-1 ml-auto text-neutral-400 hover:text-neutral-600 active:text-neutral-800 transition-colors py-1 -my-1"
           >
             <Tag className="w-3 h-3" />
             Source topics
@@ -110,15 +110,15 @@ function EpisodeCard({ ep }: { ep: any }) {
 
       {/* Linked topics dropdown */}
       {showTopics && (
-        <div className="px-4 sm:px-5 pb-3 border-t border-white/[0.04] pt-3 space-y-1.5 bg-white/[0.01]">
+        <div className="px-4 sm:px-5 pb-3 border-t border-black/[0.06] pt-3 space-y-1.5 bg-black/[0.01]">
           {linkedTopics.length === 0 ? (
-            <p className="text-xs text-slate-600 italic">No topics linked to this episode.</p>
+            <p className="text-xs text-neutral-400 italic">No topics linked to this episode.</p>
           ) : (
             linkedTopics.map(t => (
-              <div key={t.id} className="flex items-center gap-2 text-xs text-slate-500">
-                <div className="w-1 h-1 rounded-full bg-indigo-500/50 shrink-0" />
+              <div key={t.id} className="flex items-center gap-2 text-xs text-neutral-500">
+                <div className="w-1 h-1 rounded-full bg-red-500/50 shrink-0" />
                 <span className="truncate flex-1">{t.title}</span>
-                <span className="text-slate-700 shrink-0 text-[10px] hidden sm:inline">{t.source}</span>
+                <span className="text-neutral-300 shrink-0 text-[10px] hidden sm:inline">{t.source}</span>
               </div>
             ))
           )}
@@ -126,11 +126,11 @@ function EpisodeCard({ ep }: { ep: any }) {
       )}
 
       {/* Audio player */}
-      <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-t border-white/[0.05]">
+      <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-t border-black/[0.07]">
         {ep.audio_url ? (
           <audio controls src={ep.audio_url} className="w-full h-9 outline-none rounded-lg" />
         ) : (
-          <p className="text-center text-xs text-slate-600 py-1">
+          <p className="text-center text-xs text-neutral-400 py-1">
             No audio — go to Script Studio to generate it.
           </p>
         )}
@@ -151,27 +151,27 @@ export default function EpisodesPage() {
     <div className="space-y-6 sm:space-y-7 animate-fade-up">
       <div className="flex items-start sm:items-center justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-white">Episodes</h1>
-          <p className="text-slate-500 text-xs sm:text-sm mt-1">All your generated podcast episodes, ready to publish.</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-black">Episodes</h1>
+          <p className="text-neutral-500 text-xs sm:text-sm mt-1">All your generated podcast episodes, ready to publish.</p>
         </div>
-        <span className="text-[11px] sm:text-xs text-slate-600 bg-white/[0.04] border border-white/[0.06] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg whitespace-nowrap shrink-0">
+        <span className="text-[11px] sm:text-xs text-neutral-400 bg-black/[0.04] border border-black/[0.08] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg whitespace-nowrap shrink-0">
           {episodes.length} ep{episodes.length !== 1 ? "s" : ""}
         </span>
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64 gap-3 text-slate-600">
+        <div className="flex items-center justify-center h-64 gap-3 text-neutral-400">
           <Loader2 className="w-5 h-5 animate-spin" />
           <span className="text-sm">Loading episodes...</span>
         </div>
       ) : episodes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 sm:py-24 px-6 bg-[#13131f] border border-white/[0.06] rounded-2xl gap-4">
-          <div className="w-16 h-16 rounded-2xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center">
-            <Headphones className="w-7 h-7 text-slate-700" />
+        <div className="flex flex-col items-center justify-center py-16 sm:py-24 px-6 bg-white border border-black/[0.08] rounded-2xl gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-black/[0.03] border border-black/[0.09] flex items-center justify-center">
+            <Headphones className="w-7 h-7 text-neutral-300" />
           </div>
           <div className="text-center">
-            <p className="text-slate-300 font-medium">No episodes yet</p>
-            <p className="text-slate-600 text-sm mt-1">Go to Topic Discovery to create your first episode.</p>
+            <p className="text-neutral-800 font-medium">No episodes yet</p>
+            <p className="text-neutral-400 text-sm mt-1">Go to Topic Discovery to create your first episode.</p>
           </div>
         </div>
       ) : (

@@ -6,12 +6,15 @@ import { Sidebar } from "./components/Sidebar";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "TechX TV — Podcast Studio",
-  description: "AI-powered tech podcast generator. Research, script, and publish episodes with real insights.",
+  title: "The TechX Studio",
+  description: "The TechX's content studio — research a story once, produce a podcast episode, Reel, YouTube video, LinkedIn post, WhatsApp update, and X post from the same brief.",
+  icons: {
+    icon: "https://res.cloudinary.com/daq0xtstq/image/upload/v1774724198/THE_TECH_1_v22x8k.svg",
+  },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#080810",
+  themeColor: "#ffffff",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
@@ -21,13 +24,13 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${inter.variable} font-[var(--font-inter)] bg-[#080810] text-slate-200 min-h-[100svh] flex antialiased overflow-x-hidden`}>
+    <html lang="en">
+      <body className={`${inter.variable} font-[var(--font-inter)] bg-white text-neutral-800 min-h-[100svh] flex antialiased overflow-x-hidden`}>
         {/* Ambient background */}
         <div className="fixed inset-0 pointer-events-none z-0" aria-hidden>
-          <div className="absolute top-0 md:left-60 right-0 h-px bg-gradient-to-r from-transparent via-indigo-500/20 to-transparent" />
-          <div className="absolute top-[-200px] left-[30%] w-[600px] h-[600px] rounded-full bg-indigo-600/[0.04] blur-[120px]" />
-          <div className="absolute bottom-[-100px] right-[10%] w-[400px] h-[400px] rounded-full bg-violet-600/[0.03] blur-[100px]" />
+          <div className="absolute top-0 md:left-60 right-0 h-px bg-gradient-to-r from-transparent via-red-500/25 to-transparent" />
+          <div className="absolute top-[-200px] left-[30%] w-[600px] h-[600px] rounded-full bg-red-600/[0.05] blur-[120px]" />
+          <div className="absolute bottom-[-100px] right-[10%] w-[400px] h-[400px] rounded-full bg-red-400/[0.04] blur-[100px]" />
         </div>
 
         <Sidebar />

@@ -6,15 +6,15 @@
 }
 
 :root {
-  --bg-base:    #080810;
-  --bg-surface: #0f0f1a;
-  --bg-card:    #13131f;
-  --bg-hover:   #1a1a28;
-  --border:     rgba(255,255,255,0.06);
-  --border-hover: rgba(255,255,255,0.12);
-  --indigo:     #6366f1;
-  --indigo-dim: rgba(99,102,241,0.15);
-  --indigo-glow: rgba(99,102,241,0.08);
+  --bg-base:    #ffffff;
+  --bg-surface: #ffffff;
+  --bg-card:    #ffffff;
+  --bg-hover:   #f5f5f5;
+  --border:     rgba(0,0,0,0.10);
+  --border-hover: rgba(0,0,0,0.18);
+  --red:        #dc2626;
+  --red-dim:    rgba(220,38,38,0.12);
+  --red-glow:   rgba(220,38,38,0.08);
 }
 
 /* ── Base ─────────────────────────────────────────── */
@@ -29,7 +29,7 @@ html {
 
 body {
   background: var(--bg-base);
-  color: #e2e8f0;
+  color: #111111;
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -64,10 +64,10 @@ input, textarea, select {
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.12);
   border-radius: 99px;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.22); }
 
 /* Hide scrollbars on touch (mobile) — they take up usable space and look ugly */
 @media (hover: none) and (pointer: coarse) {
@@ -76,12 +76,12 @@ input, textarea, select {
 
 /* ── Focus ────────────────────────────────────────── */
 :focus-visible {
-  outline: 2px solid rgba(99,102,241,0.6);
+  outline: 2px solid rgba(220,38,38,0.6);
   outline-offset: 2px;
 }
 
 /* ── Selection ────────────────────────────────────── */
-::selection { background: rgba(99,102,241,0.28); }
+::selection { background: rgba(220,38,38,0.22); }
 
 /* ── Line-clamp helpers (Tailwind v4 keeps these via core, but
        declaring them explicitly avoids any plugin dependency.) ───── */
@@ -112,9 +112,9 @@ input, textarea, select {
   to   { opacity: 1; transform: translateX(0); }
 }
 @keyframes pulse-ring {
-  0%   { box-shadow: 0 0 0 0 rgba(99,102,241,0.4); }
-  70%  { box-shadow: 0 0 0 8px rgba(99,102,241,0); }
-  100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+  0%   { box-shadow: 0 0 0 0 rgba(220,38,38,0.4); }
+  70%  { box-shadow: 0 0 0 8px rgba(220,38,38,0); }
+  100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); }
 }
 
 .animate-fade-up       { animation: fade-up 0.35s ease both; }
@@ -137,13 +137,13 @@ input, textarea, select {
   transition: box-shadow 0.25s ease, border-color 0.25s ease;
 }
 .card-glow:hover {
-  box-shadow: 0 0 0 1px rgba(99,102,241,0.25), 0 8px 32px rgba(0,0,0,0.4);
-  border-color: rgba(99,102,241,0.25) !important;
+  box-shadow: 0 0 0 1px rgba(220,38,38,0.25), 0 8px 24px rgba(0,0,0,0.10);
+  border-color: rgba(220,38,38,0.3) !important;
 }
 
 /* ── Gradient text ────────────────────────────────── */
 .gradient-text {
-  background: linear-gradient(135deg, #e2e8f0 0%, #a5b4fc 60%, #818cf8 100%);
+  background: linear-gradient(135deg, #171717 0%, #ef4444 60%, #dc2626 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -151,7 +151,7 @@ input, textarea, select {
 
 /* ── Glass surface ────────────────────────────────── */
 .glass {
-  background: rgba(255,255,255,0.03);
+  background: rgba(0,0,0,0.03);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
@@ -163,5 +163,5 @@ audio {
   max-width: 100%;
 }
 audio::-webkit-media-controls-panel {
-  background: rgba(99,102,241,0.08);
+  background: rgba(220,38,38,0.08);
 }

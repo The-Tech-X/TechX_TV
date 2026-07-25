@@ -181,13 +181,13 @@ export default function ScriptStudioPage() {
 
   const EpisodeList = (
     <>
-      <div className="px-4 py-3 border-b border-white/[0.06] bg-white/[0.01] flex items-center justify-between">
-        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">All Episodes</h2>
+      <div className="px-4 py-3 border-b border-black/[0.08] bg-black/[0.01] flex items-center justify-between">
+        <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">All Episodes</h2>
         <button
           type="button"
           aria-label="Close list"
           onClick={() => setEpisodeListOpen(false)}
-          className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.05] transition-colors"
+          className="md:hidden p-1.5 rounded-lg text-neutral-600 hover:text-black hover:bg-black/[0.05] transition-colors"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
@@ -195,11 +195,11 @@ export default function ScriptStudioPage() {
       <div className="flex-1 overflow-y-auto">
         {isLoading && (
           <div className="flex justify-center py-10">
-            <Loader2 className="w-5 h-5 text-slate-700 animate-spin" />
+            <Loader2 className="w-5 h-5 text-neutral-300 animate-spin" />
           </div>
         )}
         {!isLoading && episodes.length === 0 && (
-          <div className="px-4 py-10 text-center text-slate-600 text-xs leading-relaxed">
+          <div className="px-4 py-10 text-center text-neutral-400 text-xs leading-relaxed">
             No episodes yet.<br />Go to Topic Discovery to create one.
           </div>
         )}
@@ -209,18 +209,18 @@ export default function ScriptStudioPage() {
           <button
             key={ep.id}
             onClick={() => handleSelectEpisode(ep)}
-            className={`w-full text-left px-4 py-3.5 border-b border-white/[0.04] hover:bg-white/[0.03] active:bg-white/[0.06] transition-colors relative group ${
-              selectedEpisode?.id === ep.id ? "bg-indigo-500/[0.07]" : ""
+            className={`w-full text-left px-4 py-3.5 border-b border-black/[0.06] hover:bg-black/[0.03] active:bg-black/[0.06] transition-colors relative group ${
+              selectedEpisode?.id === ep.id ? "bg-red-500/[0.07]" : ""
             }`}
           >
             {selectedEpisode?.id === ep.id && (
-              <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-indigo-400 rounded-full" />
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-red-400 rounded-full" />
             )}
-            <div className={`text-sm font-medium truncate ${selectedEpisode?.id === ep.id ? "text-white" : "text-slate-300"}`}>
+            <div className={`text-sm font-medium truncate ${selectedEpisode?.id === ep.id ? "text-black" : "text-neutral-800"}`}>
               {ep.week_id}
             </div>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[11px] text-slate-600">
+              <span className="text-[11px] text-neutral-400">
                 {new Date(ep.created_at).toLocaleDateString()}
               </span>
               {status === "generating" && (
@@ -247,15 +247,15 @@ export default function ScriptStudioPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 shrink-0">
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-white">Script Studio</h1>
-          <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Edit AI-generated scripts and synthesize podcast audio.</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-black">Podcast</h1>
+          <p className="text-neutral-500 text-xs sm:text-sm mt-0.5">Edit AI-generated scripts and synthesize podcast audio.</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setEpisodeListOpen(true)}
             title="Episodes"
             aria-label="Open episodes list"
-            className="md:hidden p-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] text-slate-400 hover:text-white transition-all border border-white/[0.06]"
+            className="md:hidden p-2 rounded-xl bg-black/[0.04] hover:bg-black/[0.08] active:bg-black/[0.12] text-neutral-600 hover:text-black transition-all border border-black/[0.08]"
           >
             <ListMusic className="w-4 h-4" />
           </button>
@@ -263,7 +263,7 @@ export default function ScriptStudioPage() {
             onClick={loadEpisodes}
             title="Refresh episodes"
             aria-label="Refresh episodes"
-            className="p-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] text-slate-400 hover:text-white transition-all border border-white/[0.06]"
+            className="p-2 rounded-xl bg-black/[0.04] hover:bg-black/[0.08] active:bg-black/[0.12] text-neutral-600 hover:text-black transition-all border border-black/[0.08]"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
           </button>
@@ -272,7 +272,7 @@ export default function ScriptStudioPage() {
 
       <div className="flex gap-5 flex-1 md:overflow-hidden min-h-0">
         {/* Episodes sidebar — desktop */}
-        <div className="hidden md:flex w-56 bg-[#13131f] border border-white/[0.06] rounded-2xl flex-col overflow-hidden shrink-0">
+        <div className="hidden md:flex w-56 bg-white border border-black/[0.08] rounded-2xl flex-col overflow-hidden shrink-0">
           {EpisodeList}
         </div>
 
@@ -281,7 +281,7 @@ export default function ScriptStudioPage() {
           <div className="md:hidden fixed inset-0 z-[60] flex animate-fade-in" onClick={() => setEpisodeListOpen(false)}>
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
             <div
-              className="relative w-72 max-w-[85vw] bg-[#13131f] border-r border-white/[0.06] flex flex-col animate-slide-right"
+              className="relative w-72 max-w-[85vw] bg-white border-r border-black/[0.08] flex flex-col animate-slide-right"
               onClick={e => e.stopPropagation()}
             >
               {EpisodeList}
@@ -293,17 +293,17 @@ export default function ScriptStudioPage() {
         {selectedEpisode ? (
           <div className="flex-1 flex flex-col gap-3 sm:gap-4 md:overflow-hidden min-w-0">
             {/* Toolbar */}
-            <div className="bg-[#13131f] border border-white/[0.06] rounded-2xl px-3 sm:px-4 py-3 flex items-center gap-2 sm:gap-3 shrink-0 flex-wrap">
-              <span className="bg-indigo-500/15 text-indigo-300 text-xs font-bold px-2.5 sm:px-3 py-1 rounded-lg border border-indigo-500/20">
+            <div className="bg-white border border-black/[0.08] rounded-2xl px-3 sm:px-4 py-3 flex items-center gap-2 sm:gap-3 shrink-0 flex-wrap">
+              <span className="bg-red-500/15 text-red-600 text-xs font-bold px-2.5 sm:px-3 py-1 rounded-lg border border-red-500/20">
                 {selectedEpisode.week_id}
               </span>
 
-              <div className="flex items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-slate-600 flex-wrap">
+              <div className="flex items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-neutral-400 flex-wrap">
                 <span className="flex items-center gap-1"><AlignLeft className="w-3 h-3" />{wordCount.toLocaleString()}w</span>
                 <span className="hidden sm:inline">{charCount.toLocaleString()} chars</span>
                 <span className="flex items-center gap-1"><Clock className="w-3 h-3" />~{estMinutes}m</span>
                 {linkedTopics.length > 0 && (
-                  <span className="flex items-center gap-1 text-indigo-500/70">
+                  <span className="flex items-center gap-1 text-red-600/70">
                     <Link2 className="w-3 h-3" />{linkedTopics.length} topics
                   </span>
                 )}
@@ -315,13 +315,13 @@ export default function ScriptStudioPage() {
 
               <div className="ml-auto flex items-center gap-2 flex-wrap">
                 {audioStatus && (
-                  <span className="text-[11px] sm:text-xs text-indigo-300 animate-fade-in w-full sm:w-auto">{audioStatus}</span>
+                  <span className="text-[11px] sm:text-xs text-red-600 animate-fade-in w-full sm:w-auto">{audioStatus}</span>
                 )}
                 <button
                   onClick={handleReset}
                   disabled={isResetting}
                   title="Clear script and reset linked topics to active"
-                  className="flex items-center gap-1.5 bg-white/[0.05] hover:bg-red-500/20 hover:border-red-500/30 hover:text-red-300 disabled:opacity-50 text-slate-400 text-sm px-3 sm:px-3.5 py-2 sm:py-1.5 rounded-xl font-medium transition-all border border-white/[0.07]"
+                  className="flex items-center gap-1.5 bg-black/[0.05] hover:bg-red-500/20 hover:border-red-500/30 hover:text-red-600 disabled:opacity-50 text-neutral-600 text-sm px-3 sm:px-3.5 py-2 sm:py-1.5 rounded-xl font-medium transition-all border border-black/[0.09]"
                 >
                   {isResetting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
                   <span className="hidden sm:inline">{isResetting ? "Resetting…" : "Reset"}</span>
@@ -329,7 +329,7 @@ export default function ScriptStudioPage() {
                 <button
                   onClick={handleSave}
                   disabled={isSaving}
-                  className="flex items-center gap-1.5 bg-white/[0.05] hover:bg-white/[0.09] active:bg-white/[0.13] text-slate-200 text-sm px-3 sm:px-3.5 py-2 sm:py-1.5 rounded-xl font-medium transition-all border border-white/[0.07] disabled:opacity-50"
+                  className="flex items-center gap-1.5 bg-black/[0.05] hover:bg-black/[0.09] active:bg-black/[0.13] text-neutral-900 text-sm px-3 sm:px-3.5 py-2 sm:py-1.5 rounded-xl font-medium transition-all border border-black/[0.09] disabled:opacity-50"
                 >
                   {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     : saveSuccess ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
@@ -339,7 +339,7 @@ export default function ScriptStudioPage() {
                 <button
                   onClick={handleGenerateAudio}
                   disabled={isGeneratingAudio || !scriptText.trim()}
-                  className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm px-3.5 sm:px-4 py-2 sm:py-1.5 rounded-xl font-semibold transition-all shadow-lg shadow-indigo-500/20"
+                  className="flex items-center gap-1.5 bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:bg-neutral-200 disabled:text-neutral-400 text-white text-sm px-3.5 sm:px-4 py-2 sm:py-1.5 rounded-xl font-semibold transition-all shadow-lg shadow-red-500/20"
                 >
                   {isGeneratingAudio ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mic className="w-3.5 h-3.5" />}
                   {isGeneratingAudio ? "Generating..." : "Generate Audio"}
@@ -360,19 +360,19 @@ export default function ScriptStudioPage() {
                     ? "bg-red-500/[0.06] border-red-500/20"
                     : isGenerating
                       ? "bg-amber-500/[0.06] border-amber-500/20"
-                      : "bg-white/[0.02] border-white/[0.07]"
+                      : "bg-black/[0.02] border-black/[0.09]"
                 }`}>
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     {isFailed
                       ? <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
                       : isGenerating
                         ? <Loader2 className="w-5 h-5 text-amber-400 animate-spin shrink-0 mt-0.5" />
-                        : <FileText className="w-5 h-5 text-slate-500 shrink-0 mt-0.5" />}
+                        : <FileText className="w-5 h-5 text-neutral-500 shrink-0 mt-0.5" />}
                     <div className="min-w-0">
-                      <div className={`text-sm font-semibold ${isFailed ? "text-red-300" : isGenerating ? "text-amber-300" : "text-slate-300"}`}>
+                      <div className={`text-sm font-semibold ${isFailed ? "text-red-600" : isGenerating ? "text-amber-600" : "text-neutral-800"}`}>
                         {episodeStatusLabel(status)}
                       </div>
-                      <div className="text-xs text-slate-500 mt-0.5">
+                      <div className="text-xs text-neutral-500 mt-0.5">
                         {isFailed && (errMsg
                           ? `Script generation failed: ${errMsg}`
                           : "Script generation failed. Try again or open Analytics to edit the briefs.")}
@@ -380,7 +380,7 @@ export default function ScriptStudioPage() {
                         {status === "pending" && "No script yet. Generate one from the Analytics page."}
                       </div>
                       {retryStatus && (
-                        <div className="text-xs text-indigo-300 mt-1.5 flex items-center gap-1.5">
+                        <div className="text-xs text-red-600 mt-1.5 flex items-center gap-1.5">
                           <Loader2 className="w-3 h-3 animate-spin" />
                           {retryStatus}
                         </div>
@@ -390,7 +390,7 @@ export default function ScriptStudioPage() {
                   <div className="flex items-center gap-2 shrink-0">
                     <Link
                       href={`/analytics?episode=${encodeURIComponent(selectedEpisode.week_id)}`}
-                      className="flex items-center gap-1.5 bg-white/[0.05] hover:bg-white/[0.09] text-slate-200 text-xs px-3 py-2 rounded-xl font-medium border border-white/[0.07] transition-all"
+                      className="flex items-center gap-1.5 bg-black/[0.05] hover:bg-black/[0.09] text-neutral-900 text-xs px-3 py-2 rounded-xl font-medium border border-black/[0.09] transition-all"
                     >
                       <Brain className="w-3.5 h-3.5" />
                       Open Analytics
@@ -400,7 +400,7 @@ export default function ScriptStudioPage() {
                       <button
                         onClick={handleRetryScript}
                         disabled={isRetrying}
-                        className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs px-3 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-indigo-500/20"
+                        className="flex items-center gap-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs px-3 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-red-500/20"
                       >
                         {isRetrying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                         {isRetrying ? "Retrying…" : "Retry script"}
@@ -412,30 +412,30 @@ export default function ScriptStudioPage() {
             })()}
 
             {/* Script textarea */}
-            <div className="flex-1 bg-[#13131f] border border-white/[0.06] rounded-2xl overflow-hidden flex flex-col min-h-[55vh] md:min-h-0">
-              <div className="px-4 sm:px-5 py-2.5 border-b border-white/[0.05] bg-white/[0.01] flex items-center gap-2 shrink-0">
-                <FileText className="w-3.5 h-3.5 text-slate-600" />
-                <span className="text-xs text-slate-500 font-medium">Podcast Script</span>
-                <span className="ml-auto text-[10px] sm:text-[11px] text-slate-700 truncate">en-US-AndrewNeural</span>
+            <div className="flex-1 bg-white border border-black/[0.08] rounded-2xl overflow-hidden flex flex-col min-h-[55vh] md:min-h-0">
+              <div className="px-4 sm:px-5 py-2.5 border-b border-black/[0.07] bg-black/[0.01] flex items-center gap-2 shrink-0">
+                <FileText className="w-3.5 h-3.5 text-neutral-400" />
+                <span className="text-xs text-neutral-500 font-medium">Podcast Script</span>
+                <span className="ml-auto text-[10px] sm:text-[11px] text-neutral-300 truncate">en-US-AndrewNeural</span>
               </div>
               <textarea
                 value={scriptText}
                 onChange={e => setScriptText(e.target.value)}
                 spellCheck={false}
-                className="flex-1 bg-transparent px-4 sm:px-6 py-4 sm:py-5 text-[14px] sm:text-[15px] text-slate-200 leading-[1.8] sm:leading-[1.9] focus:outline-none resize-none min-h-[300px] md:min-h-0 font-[system-ui,sans-serif]"
+                className="flex-1 bg-transparent px-4 sm:px-6 py-4 sm:py-5 text-[14px] sm:text-[15px] text-neutral-900 leading-[1.8] sm:leading-[1.9] focus:outline-none resize-none min-h-[300px] md:min-h-0 font-[system-ui,sans-serif]"
                 placeholder="Your podcast script will appear here after generating an episode. You can also write or edit it manually..."
               />
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center bg-[#13131f] border border-white/[0.06] rounded-2xl min-h-[40vh]">
+          <div className="flex-1 flex items-center justify-center bg-white border border-black/[0.08] rounded-2xl min-h-[40vh]">
             <div className="text-center space-y-3 px-6">
-              <div className="w-14 h-14 rounded-2xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center mx-auto">
-                <Headphones className="w-6 h-6 text-slate-700" />
+              <div className="w-14 h-14 rounded-2xl bg-black/[0.03] border border-black/[0.09] flex items-center justify-center mx-auto">
+                <Headphones className="w-6 h-6 text-neutral-300" />
               </div>
               <div>
-                <p className="text-slate-400 font-medium text-sm">Select an episode</p>
-                <p className="text-slate-600 text-xs mt-1">
+                <p className="text-neutral-600 font-medium text-sm">Select an episode</p>
+                <p className="text-neutral-400 text-xs mt-1">
                   <span className="md:hidden">Tap the list icon above to pick one.</span>
                   <span className="hidden md:inline">The script will load here for editing.</span>
                 </p>
@@ -443,7 +443,7 @@ export default function ScriptStudioPage() {
               {episodes.length > 0 && (
                 <button
                   onClick={() => setEpisodeListOpen(true)}
-                  className="md:hidden inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white text-sm px-4 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-indigo-500/20"
+                  className="md:hidden inline-flex items-center gap-2 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-sm px-4 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-red-500/20"
                 >
                   <ListMusic className="w-4 h-4" />
                   Browse episodes

@@ -4,13 +4,13 @@ A Next.js 16 app for producing a sharp, no-nonsense tech podcast end-to-end:
 
 1. **Capture** news URLs → auto-scraped into a topics list.
 2. **Curate** which stories make this episode.
-3. **Analyze** each story with Tavily web search + Mistral Large 3 reasoning → an editable structured brief (Summary / Why now / Key facts / Bigger picture / Honest take).
+3. **Analyze** each story with Firecrawl web search + Mistral Large 3 reasoning → an editable structured brief (Summary / Why now / Key facts / Bigger picture / Honest take).
 4. **Generate** one flowing podcast script (English or Tenglish) that applies real audio-retention craft — cold-open hook, dopamine curiosity gaps, three storytelling frameworks (What/So What/Now What, ABT, David vs Goliath), and ~90-120s micro-resets.
 5. **Synthesize** voice via Edge TTS and upload the MP3 to Supabase Storage.
 
 ```
 Topic Discovery ─► /analytics?episode=Ep-01 ─► Script Studio
-[paste URLs]       [Tavily + Mistral per topic]    [edit script]
+[paste URLs]       [Firecrawl + Mistral per topic]    [edit script]
 [select stories]   [edit briefs]                   [generate audio]
 [Analyze Topics]   [Generate Script ↗]             [publish]
 ```
@@ -22,7 +22,7 @@ Topic Discovery ─► /analytics?episode=Ep-01 ─► Script Studio
 | Framework        | Next.js 16 (App Router, Turbopack)                           |
 | UI               | Tailwind v4, Lucide icons                                    |
 | Database/Storage | Supabase (Postgres + Storage bucket)                         |
-| Web search       | Tavily (`/api/analytics`)                                    |
+| Web search       | Firecrawl (`/api/analytics`)                                 |
 | Reasoning model  | `mistralai/mistral-large-3-675b-instruct-2512` via NVIDIA NIM |
 | Script writer    | Llama 3 70B (English) or Sarvam-M (Tenglish) via NVIDIA NIM  |
 | TTS              | Microsoft Edge TTS — `en-US-AndrewNeural`                    |
@@ -36,7 +36,7 @@ All have free tiers.
 | ---------------------------------- | -------------------------------------------------------- | -------------------- |
 | Supabase                           | Project URL + service-role key + an `audio` storage bucket | https://supabase.com |
 | NVIDIA Build (NIM)                 | API key (free, generous limits)                          | https://build.nvidia.com |
-| Tavily                             | API key (1k free searches / mo)                          | https://tavily.com   |
+| Firecrawl                           | API key (monthly quota)                                  | https://firecrawl.dev |
 | Render                             | Free account                                             | https://render.com   |
 
 Drop all of them into `.env` locally — see `.env.example` for the exact keys.
@@ -100,7 +100,7 @@ git push -u origin main
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `NVIDIA_API_KEY`
-   - `TAVILY_API_KEY`
+   - `FIRECRAWL_API_KEY`
    - `NODE_VERSION` = `20`
 4. Click **Create Web Service**. First build takes ~3-5 min.
 
@@ -150,7 +150,7 @@ app/
   episodes/page.tsx        Browse past episodes
   api/
     scrape/route.ts        URL → article title + content (Readability)
-    analytics/route.ts     Topic → Tavily search → Mistral Large 3 → structured brief
+    analytics/route.ts     Topic → Firecrawl search → Mistral Large 3 → structured brief
     analyze/route.ts       Selected topics + briefs → flowing podcast script
     tts/route.ts           Script → MP3 → Supabase Storage
   actions/
@@ -164,7 +164,7 @@ supabase/
 
 | Symptom                                          | Likely cause                                                                 |
 | ------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Analytics page hangs forever                     | `TAVILY_API_KEY` or `NVIDIA_API_KEY` missing on the server. Check Render env. |
+| Analytics page hangs forever                     | `FIRECRAWL_API_KEY` or `NVIDIA_API_KEY` missing on the server. Check Render env. |
 | `TTS API Error: Timed out`                       | Already fixed — TTS route uses 5-min timeout. If it recurs, the script is very long; chunk it or upgrade Render plan. |
 | Script never appears in Script Studio after generate | Open Render → Logs. Look for `[Analyze]` lines — NVIDIA model errors print there. |
 | Audio button does nothing                        | The Supabase `audio` bucket is missing or isn't public.                       |

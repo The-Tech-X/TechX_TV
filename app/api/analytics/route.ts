@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { Agent } from 'undici';
+import { RETRY_DELAYS_MS, isTransientError } from '../../lib/retry';
+import { getSettings, getStageConfig, type Provider } from '../../lib/settings';
+import { callChatModel, parseModelJson } from '../../lib/aiProvider';
 
-// Phase 1: per-topic Tavily + Mistral (parallel, ~2-4 min for 10 topics)
-// Phase 2: one batch Mistral call to rank all topics for social media potential
+// Phase 1: per-topic Firecrawl web search + analysis model (parallel, ~2-4 min for 10 topics)
+// Phase 2: one batch scoring call to rank all topics for social media potential
 export const maxDuration = 300;
 export const runtime = 'nodejs';
 
@@ -11,9 +15,76 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 );
 
-const TAVILY_URL    = 'https://api.tavily.com/search';
-const NIM_URL       = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const MISTRAL_MODEL = 'mistralai/mistral-large-3-675b-instruct-2512';
+const FIRECRAWL_URL = 'https://api.firecrawl.dev/v2/search';
+
+// Firecrawl's search endpoint scrapes full page content for every result
+// (scrapeOptions below), which can run past undici's default 5-minute
+// headersTimeout/bodyTimeout — the exact failure mode already hit once in
+// app/api/analyze/route.ts for the NVIDIA call ("fetch failed" with no
+// further detail). Same fix: a dispatcher scoped to just this fetch.
+const FIRECRAWL_TIMEOUT_MS = 8 * 60 * 1000; // 8 minutes
+const firecrawlDispatcher = new Agent({
+  headersTimeout:   FIRECRAWL_TIMEOUT_MS,
+  bodyTimeout:      FIRECRAWL_TIMEOUT_MS,
+  connectTimeout:   30_000,
+  keepAliveTimeout: 60_000,
+});
+
+// The analysis model call gets the same generous watchdog budget — whichever
+// provider is configured for the "analysis" stage, a slow response shouldn't
+// get killed early. callChatModel (app/lib/aiProvider.ts) applies its own
+// long-timeout dispatcher internally; this is just the retry loop's bound.
+const MODEL_CALL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+type StageConfig = { provider: Provider; model: string; apiKey: string };
+
+// Retries a flaky upstream call with backoff, aborting any attempt that runs
+// past `timeoutMs` so a stuck connection can't block the retry loop. Used for
+// both the Firecrawl search and the analysis call — either one can
+// transiently fail independently, so each gets its own retry budget.
+async function withRetry<T>(
+  label: string,
+  timeoutMs: number,
+  fn: (signal: AbortSignal) => Promise<T>,
+  onRetry?: (attempt: number, totalAttempts: number) => void,
+): Promise<T> {
+  const totalAttempts = RETRY_DELAYS_MS.length + 1;
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt < totalAttempts; attempt++) {
+    const ac = new AbortController();
+    const watchdog = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      console.log(`[Analytics] ${label} (attempt ${attempt + 1}/${totalAttempts})...`);
+      return await fn(ac.signal);
+    } catch (err: any) {
+      lastError = err;
+      const transient = isTransientError(err);
+      const willRetry = transient && attempt < RETRY_DELAYS_MS.length;
+      console.error(
+        `[Analytics] ${label} failed (attempt ${attempt + 1}, transient=${transient}):`,
+        err?.code || err?.name, err?.message,
+      );
+      if (!willRetry) throw err;
+      onRetry?.(attempt + 2, totalAttempts);
+      const wait = RETRY_DELAYS_MS[attempt];
+      console.log(`[Analytics] ${label} retrying in ${wait / 1000}s...`);
+      await new Promise(r => setTimeout(r, wait));
+    } finally {
+      clearTimeout(watchdog);
+    }
+  }
+  throw lastError ?? new Error(`${label} failed`);
+}
+
+/** Persists in-flight step/source info so open pages can poll and show it live. */
+async function markTopicProgress(topicId: string, patch: Record<string, any> | null) {
+  const { error } = await supabase
+    .from('updates')
+    .update({ analysis_progress: patch })
+    .eq('id', topicId);
+  if (error) console.error('[Analytics] Failed to update progress for', topicId, error);
+}
 
 type TopicAnalysis = {
   summary: string;
@@ -31,43 +102,63 @@ type SocialScore = {
   social_reasoning: string;
 };
 
-type TavilyResult  = { title: string; url: string; content: string; score?: number };
-type TavilyPayload = { answer?: string; results?: TavilyResult[] };
+type SearchResult  = { title: string; url: string; content: string; score?: number };
+type SearchPayload = { answer?: string; results?: SearchResult[] };
 
-async function tavilySearch(query: string): Promise<TavilyPayload> {
-  const apiKey = process.env.TAVILY_API_KEY;
-  if (!apiKey) throw new Error('TAVILY_API_KEY is not set');
+async function firecrawlSearch(query: string, apiKey: string, signal?: AbortSignal): Promise<SearchPayload> {
+  if (!apiKey) throw new Error('No Firecrawl API key saved — add one in Settings.');
 
-  const res = await fetch(TAVILY_URL, {
+  const res = await fetch(FIRECRAWL_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      // A manually-constructed undici Agent (used here for the long-timeout
+      // dispatcher) doesn't auto-decompress gzip the way undici's default
+      // dispatcher does — confirmed this breaks JSON parsing for another
+      // provider using this exact pattern (see app/lib/aiProvider.ts).
+      // Requesting no compression sidesteps it before it can bite here too.
+      'Accept-Encoding': 'identity',
+    },
     body: JSON.stringify({
-      api_key: apiKey,
       query,
-      search_depth: 'advanced',
-      include_answer: true,
-      max_results: 6,
-      include_raw_content: false,
+      limit: 5,
+      scrapeOptions: { formats: ['markdown'], onlyMainContent: true },
     }),
+    signal,
+    // @ts-expect-error — undici dispatcher option, not in stock fetch types
+    dispatcher: firecrawlDispatcher,
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Tavily ${res.status}: ${body.slice(0, 200)}`);
+    throw new Error(`Firecrawl ${res.status}: ${body.slice(0, 200)}`);
   }
-  return res.json();
+
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(`Firecrawl error: ${data.error || 'search failed'}`);
+  }
+
+  const webResults = data.data?.web || [];
+  return {
+    results: webResults.map((r: any) => ({
+      title:   r.title || r.metadata?.title || '',
+      url:     r.url,
+      content: r.markdown || r.description || '',
+    })),
+  };
 }
 
-async function mistralAnalyze(
+async function runAnalysis(
   topic: { title: string; source: string; content: string },
-  tavily: TavilyPayload,
+  search: SearchPayload,
+  config: StageConfig,
+  signal?: AbortSignal,
 ): Promise<TopicAnalysis> {
-  const apiKey = process.env.NVIDIA_API_KEY;
-  if (!apiKey) throw new Error('NVIDIA_API_KEY is not set');
-
-  const tavilyContext = [
-    tavily.answer ? `WEB ANSWER: ${tavily.answer}` : '',
-    (tavily.results || [])
+  const searchContext = [
+    search.answer ? `WEB ANSWER: ${search.answer}` : '',
+    (search.results || [])
       .slice(0, 5)
       .map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${(r.content || '').slice(0, 800)}`)
       .join('\n\n'),
@@ -100,48 +191,31 @@ SOURCE: ${topic.source}
 ORIGINAL ARTICLE CONTENT (truncated):
 ${(topic.content || '(no content provided)').slice(0, 4000)}
 
-FRESH WEB CONTEXT (Tavily search results, most relevant first):
-${tavilyContext || '(no web context available)'}
+FRESH WEB CONTEXT (Firecrawl search results, most relevant first):
+${searchContext || '(no web context available)'}
 
 Return the JSON analysis described in the system prompt. Nothing else.`;
 
-  const res = await fetch(NIM_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-    body: JSON.stringify({
-      model: MISTRAL_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userPrompt },
-      ],
-      temperature: 0.45,
-      max_tokens: 3000,
-    }),
+  const raw = await callChatModel({
+    provider: config.provider,
+    apiKey: config.apiKey,
+    model: config.model,
+    systemPrompt,
+    userPrompt,
+    maxTokens: 3000,
+    temperature: 0.45,
+    signal,
   });
-
-  const data = await res.json();
-  if (!res.ok || data.error) {
-    throw new Error(`Mistral ${res.status}: ${(data.error?.message || JSON.stringify(data)).slice(0, 200)}`);
-  }
-
-  let raw: string = data.choices?.[0]?.message?.content ?? '';
-  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-  const match = raw.match(/\{[\s\S]*\}/);
-  const jsonStr = match ? match[0] : raw;
 
   let parsed: any;
   try {
-    parsed = JSON.parse(jsonStr);
+    parsed = parseModelJson(raw);
   } catch {
-    console.error('[Analytics] Mistral returned unparseable JSON:', raw.slice(0, 300));
+    console.error('[Analytics] Analysis model returned unparseable JSON:', raw.slice(0, 300));
     throw new Error('Failed to parse analyst JSON');
   }
 
-  const sources = (tavily.results || []).slice(0, 5).map(r => ({ title: r.title, url: r.url }));
+  const sources = (search.results || []).slice(0, 5).map(r => ({ title: r.title, url: r.url }));
 
   return {
     summary:       String(parsed.summary       || '').trim(),
@@ -157,37 +231,85 @@ Return the JSON analysis described in the system prompt. Nothing else.`;
 
 async function analyzeOneTopic(
   topic: any,
+  firecrawlApiKey: string,
+  analysisConfig: StageConfig,
 ): Promise<{ id: string; analysis: TopicAnalysis | null; error?: string }> {
+  const query = `${topic.title} ${topic.source || ''} news context 2026`.trim();
+  let foundSources: { title: string; url: string }[] | undefined;
+
   try {
-    const query = `${topic.title} ${topic.source || ''} news context 2026`.trim();
-    const tavily = await tavilySearch(query);
-    const analysis = await mistralAnalyze(
-      { title: topic.title, source: topic.source || '', content: topic.content || '' },
-      tavily,
+    await markTopicProgress(topic.id, { step: 'searching', query, updated_at: new Date().toISOString() });
+
+    const search = await withRetry(
+      `Firecrawl search for "${topic.title}"`,
+      FIRECRAWL_TIMEOUT_MS,
+      signal => firecrawlSearch(query, firecrawlApiKey, signal),
+      (attempt, totalAttempts) => markTopicProgress(topic.id, {
+        step: 'searching', query, retrying: true, attempt, totalAttempts,
+        updated_at: new Date().toISOString(),
+      }),
+    );
+
+    foundSources = (search.results || []).slice(0, 5).map(r => ({ title: r.title, url: r.url }));
+    console.log(
+      `[Analytics] Found ${foundSources.length} source(s) for "${topic.title}": ` +
+      foundSources.map(s => s.url).join(', '),
+    );
+
+    // Persisted now (not after the analysis call) so WhatsApp/LinkedIn/X
+    // generation — which reads this directly instead of the brief — doesn't
+    // depend on the (slower, less reliable) analysis call ever succeeding.
+    const scrapedContent = (search.results || []).slice(0, 5).map(r => ({
+      title: r.title, url: r.url, content: (r.content || '').slice(0, 8000),
+    }));
+    await supabase
+      .from('updates')
+      .update({
+        analysis_progress: { step: 'analyzing', sources: foundSources, updated_at: new Date().toISOString() },
+        scraped_content: scrapedContent,
+      })
+      .eq('id', topic.id);
+
+    const analysis = await withRetry(
+      `Analysis (${analysisConfig.provider}/${analysisConfig.model}) for "${topic.title}"`,
+      MODEL_CALL_TIMEOUT_MS,
+      signal => runAnalysis(
+        { title: topic.title, source: topic.source || '', content: topic.content || '' },
+        search,
+        analysisConfig,
+        signal,
+      ),
+      (attempt, totalAttempts) => markTopicProgress(topic.id, {
+        step: 'analyzing', sources: foundSources, retrying: true, attempt, totalAttempts,
+        updated_at: new Date().toISOString(),
+      }),
     );
 
     const { error } = await supabase
       .from('updates')
-      .update({ analysis_json: analysis })
+      .update({ analysis_json: analysis, analysis_progress: null })
       .eq('id', topic.id);
     if (error) console.error('[Analytics] DB save error for', topic.id, error);
 
     return { id: topic.id, analysis };
   } catch (e: any) {
-    console.error('[Analytics] Topic failed:', topic.id, topic.title, e?.message);
-    return { id: topic.id, analysis: null, error: e?.message || 'Analysis failed' };
+    const message = e?.message || 'Analysis failed';
+    console.error('[Analytics] Topic failed:', topic.id, topic.title, message);
+    await markTopicProgress(topic.id, {
+      step: 'failed', error: String(message).slice(0, 500), sources: foundSources,
+      updated_at: new Date().toISOString(),
+    });
+    return { id: topic.id, analysis: null, error: message };
   }
 }
 
-// Phase 2: one Mistral call sees ALL topic summaries and ranks them for social potential.
+// Phase 2: one call sees ALL topic summaries and ranks them for social potential.
 // Relative ranking is the key benefit — the AI can say "topic 3 is clearly the best
 // Instagram candidate *compared to the others this week*", not just in isolation.
 async function runSocialScoring(
   topics: Array<{ id: string; title: string; analysis: TopicAnalysis | null }>,
+  config: StageConfig,
 ): Promise<SocialScore[]> {
-  const apiKey = process.env.NVIDIA_API_KEY;
-  if (!apiKey) throw new Error('NVIDIA_API_KEY is not set');
-
   const topicList = topics
     .map((t, i) => {
       const a = t.analysis;
@@ -244,39 +366,19 @@ ${topicList}
 
 Return the JSON array. One entry per topic. Exact IDs preserved.`;
 
-  const res = await fetch(NIM_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-    body: JSON.stringify({
-      model: MISTRAL_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userPrompt },
-      ],
-      temperature: 0.3,
-      max_tokens: 2000,
-    }),
+  const raw = await callChatModel({
+    provider: config.provider,
+    apiKey: config.apiKey,
+    model: config.model,
+    systemPrompt,
+    userPrompt,
+    maxTokens: 2000,
+    temperature: 0.3,
   });
-
-  const data = await res.json();
-  if (!res.ok || data.error) {
-    throw new Error(`Mistral social scoring ${res.status}: ${(data.error?.message || JSON.stringify(data)).slice(0, 200)}`);
-  }
-
-  let raw: string = data.choices?.[0]?.message?.content ?? '';
-  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
-  // Extract JSON array from response
-  const arrMatch = raw.match(/\[[\s\S]*\]/);
-  const jsonStr = arrMatch ? arrMatch[0] : raw;
 
   let parsed: any[];
   try {
-    parsed = JSON.parse(jsonStr);
+    parsed = parseModelJson(raw);
     if (!Array.isArray(parsed)) throw new Error('Not an array');
   } catch {
     console.error('[Analytics] Social scoring returned unparseable JSON:', raw.slice(0, 400));
@@ -295,16 +397,62 @@ Return the JSON array. One entry per topic. Exact IDs preserved.`;
 
 export async function POST(req: Request) {
   try {
-    const { topicIds, force } = await req.json();
+    const { topicIds, force, skipScoring, dateFrom, dateTo } = await req.json();
 
+    const settings = await getSettings();
+    const analysisConfig = await getStageConfig('analysis');
+
+    if (!settings.firecrawl_api_key) {
+      return NextResponse.json({ error: 'No Firecrawl API key saved — add one in Settings.' }, { status: 500 });
+    }
+    if (!analysisConfig.apiKey) {
+      return NextResponse.json({ error: `No ${analysisConfig.provider} API key saved — add one in Settings.` }, { status: 500 });
+    }
+
+    // ── Score-only mode: no Phase 1 — batch-scores whatever's already
+    //    analyzed within a date range. Used by the "Score this range" action,
+    //    decoupled from the (now automatic, per-topic) brief generation. ─────
+    if (dateFrom && dateTo) {
+      const { data: topics, error } = await supabase
+        .from('updates')
+        .select('*')
+        .not('analysis_json', 'is', null)
+        .gte('created_at', `${dateFrom}T00:00:00.000Z`)
+        .lte('created_at', `${dateTo}T23:59:59.999Z`);
+      if (error) throw error;
+      if (!topics || topics.length === 0) {
+        return NextResponse.json({ error: 'No analyzed topics found in that date range' }, { status: 404 });
+      }
+
+      const allForScoring = topics.map(t => ({
+        id:       t.id,
+        title:    t.title,
+        analysis: t.analysis_json as TopicAnalysis,
+      }));
+      const socialScores = await runSocialScoring(allForScoring, analysisConfig);
+
+      await Promise.all(
+        socialScores.map(s =>
+          supabase
+            .from('updates')
+            .update({
+              social_score:          s.social_score,
+              recommended_platform:  s.recommended_platform,
+              social_reasoning:      s.social_reasoning,
+            })
+            .eq('id', s.id),
+        ),
+      );
+
+      return NextResponse.json({ success: true, scored: socialScores.length, results: socialScores });
+    }
+
+    // ── Standard mode: Phase 1 per-topic analysis, optionally followed by
+    //    Phase 2 batch scoring (skipped when skipScoring is true — used by
+    //    the auto-trigger fired the moment a single topic is added, where
+    //    there's nothing yet to compare it against). ──────────────────────
     if (!Array.isArray(topicIds) || topicIds.length === 0) {
       return NextResponse.json({ error: 'topicIds (string[]) is required' }, { status: 400 });
-    }
-    if (!process.env.TAVILY_API_KEY) {
-      return NextResponse.json({ error: 'TAVILY_API_KEY missing on server' }, { status: 500 });
-    }
-    if (!process.env.NVIDIA_API_KEY) {
-      return NextResponse.json({ error: 'NVIDIA_API_KEY missing on server' }, { status: 500 });
     }
 
     const { data: topics, error } = await supabase
@@ -317,7 +465,21 @@ export async function POST(req: Request) {
     const skipped = (topics || []).filter(t => !force && t.analysis_json);
 
     // ── Phase 1: per-topic analysis (parallel) ───────────────────────────────
-    const phase1Results = await Promise.all(todo.map(analyzeOneTopic));
+    const phase1Results = await Promise.all(
+      todo.map(t => analyzeOneTopic(t, settings.firecrawl_api_key, analysisConfig)),
+    );
+
+    if (skipScoring) {
+      return NextResponse.json({
+        success:  true,
+        analyzed: phase1Results.length,
+        skipped:  skipped.length,
+        results: [
+          ...phase1Results.map(r => ({ id: r.id, analysis: r.analysis, error: r.error, skipped: false, social: null })),
+          ...skipped.map(t => ({ id: t.id, analysis: t.analysis_json, skipped: true, social: null })),
+        ],
+      });
+    }
 
     // Merge phase 1 results with skipped topics for phase 2 input
     const allForScoring: Array<{ id: string; title: string; analysis: TopicAnalysis | null }> = [
@@ -333,10 +495,10 @@ export async function POST(req: Request) {
       })),
     ];
 
-    // ── Phase 2: batch social scoring (one Mistral call sees all topics) ─────
+    // ── Phase 2: batch social scoring (one call sees all topics) ─────────────
     let socialScores: SocialScore[] = [];
     try {
-      socialScores = await runSocialScoring(allForScoring);
+      socialScores = await runSocialScoring(allForScoring, analysisConfig);
 
       // Persist social scores back to each update row
       await Promise.all(

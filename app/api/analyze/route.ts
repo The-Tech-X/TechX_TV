@@ -2,16 +2,20 @@ import { NextResponse } from 'next/server';
 import { Client } from '@upstash/qstash';
 import { createClient } from '@supabase/supabase-js';
 import { Agent } from 'undici';
+import { RETRY_DELAYS_MS, isTransientError } from '../../lib/retry';
+import { getStageConfig, type Provider } from '../../lib/settings';
+import { buildProviderRequest, extractRawText, extractFinishReason } from '../../lib/aiProvider';
 
-// The NIM call can run for many minutes — give the route handler headroom.
+// The model call can run for many minutes — give the route handler headroom.
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// Long-running LLM calls — Llama-3.1-70B with 8 topics and 8000 max_tokens
-// regularly takes 6-10 minutes to return its first byte. Undici's default
-// headersTimeout/bodyTimeout of 5 minutes was killing the request on Render
-// with UND_ERR_HEADERS_TIMEOUT before NIM could respond. This dispatcher is
-// scoped to the NVIDIA fetch only so Tavily / Supabase keep their snappy defaults.
+// Long-running LLM calls — Llama-3.1-70B (the default "podcast" model) with 8
+// topics and 8000 max_tokens regularly takes 6-10 minutes to return its first
+// byte. Undici's default headersTimeout/bodyTimeout of 5 minutes was killing
+// the request on Render with UND_ERR_HEADERS_TIMEOUT before it could respond.
+// This dispatcher is scoped to this fetch only so Firecrawl / Supabase keep
+// their snappy defaults.
 const NVIDIA_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 const nvidiaDispatcher = new Agent({
   headersTimeout: NVIDIA_TIMEOUT_MS,
@@ -19,34 +23,6 @@ const nvidiaDispatcher = new Agent({
   connectTimeout: 30_000,
   keepAliveTimeout: 60_000,
 });
-
-// We allow 4 attempts total — initial + 3 retries with backoff (5s, 15s, 45s).
-const RETRY_DELAYS_MS = [5_000, 15_000, 45_000];
-
-// Errors that mean "try again, the network or the upstream blinked" — NOT
-// errors that mean "the request itself is bad and would keep failing".
-const TRANSIENT_ERROR_CODES = new Set([
-  'UND_ERR_HEADERS_TIMEOUT',
-  'UND_ERR_BODY_TIMEOUT',
-  'UND_ERR_CONNECT_TIMEOUT',
-  'UND_ERR_SOCKET',
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'ETIMEDOUT',
-  'EAI_AGAIN',
-  'ENOTFOUND',
-]);
-
-function isTransientError(err: any): boolean {
-  if (!err) return false;
-  const code = err.code || err.cause?.code;
-  if (code && TRANSIENT_ERROR_CODES.has(code)) return true;
-  if (err.name === 'AbortError') return true;
-  // NIM sometimes returns an empty/partial body — res.json() throws a SyntaxError
-  // with no .code, so it wasn't being retried. Treat it as transient.
-  if (err instanceof SyntaxError && err.message.toLowerCase().includes('json')) return true;
-  return false;
-}
 
 const qstashClient = new Client({ token: process.env.QSTASH_TOKEN || '' });
 
@@ -85,6 +61,12 @@ export async function POST(req: Request) {
       const episodeWeekId = url.searchParams.get('episodeId');
       const topicIdsParam  = url.searchParams.get('topicIds') || '';
       const responseFormat = url.searchParams.get('format') === 'text' ? 'text' : 'json';
+      // Which provider generated this response — stamped into the callback
+      // URL when the trigger branch fired, so the (differently-shaped) raw
+      // response body can be parsed correctly regardless of which provider
+      // is configured for the "podcast" stage. Defaults to 'nvidia' so any
+      // callback already in flight from before this field existed still parses.
+      const provider = (url.searchParams.get('provider') || 'nvidia') as Provider;
 
       if (!episodeWeekId) {
         return NextResponse.json({ error: 'Missing episodeId in callback' }, { status: 400 });
@@ -94,7 +76,7 @@ export async function POST(req: Request) {
       try {
         body = await req.json();
       } catch (parseErr: any) {
-        const errMsg = `Callback received non-JSON body from NIM: ${parseErr.message}`;
+        const errMsg = `Callback received non-JSON body from ${provider}: ${parseErr.message}`;
         console.error('[Callback]', errMsg);
         await supabase.from('episodes').upsert(
           { week_id: episodeWeekId, analysis_json: { status: 'failed', error: errMsg.slice(0, 500), failed_at: new Date().toISOString() }, updated_at: new Date().toISOString() },
@@ -103,14 +85,14 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: errMsg }, { status: 502 });
       }
 
-      if (!body.choices?.[0]?.message) {
+      let rawContent: string = extractRawText(provider, body);
+      const finishReason: string | undefined = extractFinishReason(provider, body);
+      const truncatedByModel = finishReason === 'length' || finishReason === 'max_tokens' || finishReason === 'MAX_TOKENS';
+
+      if (!rawContent) {
         console.error('[Callback] Invalid AI response structure', JSON.stringify(body).slice(0, 500));
         return NextResponse.json({ error: 'Invalid AI response' }, { status: 500 });
       }
-
-      let rawContent: string = body.choices[0].message.content;
-      const finishReason: string | undefined = body.choices?.[0]?.finish_reason;
-      const truncatedByModel = finishReason === 'length';
 
       // Strip reasoning prose. Reasoning models leak it as <think>...</think>,
       // sometimes with malformed / mismatched tags, sometimes as plain prose.
@@ -273,8 +255,10 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Missing episodeId or topics' }, { status: 400 });
       }
 
-      const nvidiaApiKey = process.env.NVIDIA_API_KEY || '';
-      const modelId = 'meta/llama-3.1-70b-instruct';
+      const { provider, model: modelId, apiKey: providerApiKey } = await getStageConfig('podcast');
+      if (!providerApiKey) {
+        return NextResponse.json({ error: `No ${provider} API key saved — add one in Settings.` }, { status: 500 });
+      }
 
       const englishSystemPrompt = `You are Teja, the host of TechX TV — a sharp, no-fluff tech podcast for people who want to understand what's actually happening in the industry and why it matters to them personally.
 
@@ -508,26 +492,18 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
 
       const topicIds = topics.map((t: any) => t.id).filter(Boolean).join(',');
 
-      // Both branches run Llama-3.1-70B which follows JSON cleanly, so we
-      // always ask for {"script": "..."} and parse it the same way.
+      // Every provider is asked for the same {"script": "..."} shape and
+      // parsed the same way (extractRawText + JSON parse below).
       const callbackFormat: 'json' | 'text' = 'json';
-      // Do NOT include response_format — NIM's llama-3.1-70b-instruct does not
-      // reliably enforce json_object mode and can return an empty body when it
-      // doesn't recognise the field. The system prompt already instructs the
-      // model to start its response with '{', which is sufficient.
-      const nvidiaPayload: Record<string, any> = {
-        model: modelId,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userPrompt }
-        ],
-        temperature: 0.75,
-        max_tokens: 8000,
-      };
+      const { url: providerUrl, headers: providerHeaders, body: providerPayload } = buildProviderRequest({
+        provider, apiKey: providerApiKey, model: modelId,
+        systemPrompt, userPrompt,
+        temperature: 0.75, maxTokens: 8000,
+      });
 
       const host = req.headers.get('host') || 'localhost:3000';
       const protocol = host.includes('localhost') ? 'http' : 'https';
-      const callbackUrl = `${protocol}://${host}/api/analyze?isCallback=true&episodeId=${episodeId}&topicIds=${topicIds}&format=${callbackFormat}`;
+      const callbackUrl = `${protocol}://${host}/api/analyze?isCallback=true&episodeId=${episodeId}&topicIds=${topicIds}&format=${callbackFormat}&provider=${provider}`;
 
       // Deployment branching:
       //   • Vercel / serverless with short timeouts → set QSTASH_TOKEN to queue NVIDIA call.
@@ -546,11 +522,11 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
 
       if (!useQStash) {
         const port = process.env.PORT || '3000';
-        const selfCallbackUrl = `http://127.0.0.1:${port}/api/analyze?isCallback=true&episodeId=${episodeId}&topicIds=${topicIds}&format=${callbackFormat}`;
+        const selfCallbackUrl = `http://127.0.0.1:${port}/api/analyze?isCallback=true&episodeId=${episodeId}&topicIds=${topicIds}&format=${callbackFormat}&provider=${provider}`;
 
-        // Record that this episode is in-flight before we kick off the long NIM
-        // call. If the user navigates away (or the call fails), the UI can read
-        // this status and offer a Retry button.
+        // Record that this episode is in-flight before we kick off the long
+        // model call. If the user navigates away (or the call fails), the UI
+        // can read this status and offer a Retry button.
         await markEpisodeStatus(episodeId, {
           status: 'generating',
           model: modelId,
@@ -571,18 +547,19 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
 
             try {
               console.log(
-                `[Analyze] Calling NIM (${modelId}) with ${safeTopics.length} topics ` +
+                `[Analyze] Calling ${provider} (${modelId}) with ${safeTopics.length} topics ` +
                 `(attempt ${attempt + 1}/${RETRY_DELAYS_MS.length + 1})...`
               );
 
-              const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+              const res = await fetch(providerUrl, {
                 method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${nvidiaApiKey}`,
-                  'Content-Type': 'application/json',
-                  'Accept': 'application/json',
-                },
-                body: JSON.stringify(nvidiaPayload),
+                // A manually-constructed undici Agent (this dispatcher) doesn't
+                // auto-decompress gzip the way undici's default dispatcher
+                // does — confirmed this breaks JSON parsing for Gemini via this
+                // exact pattern (see app/lib/aiProvider.ts). No-compression
+                // sidesteps it regardless of which provider is configured here.
+                headers: { ...providerHeaders, 'Accept-Encoding': 'identity' },
+                body: JSON.stringify(providerPayload),
                 signal: ac.signal,
                 // @ts-expect-error — undici dispatcher option, not in stock fetch types
                 dispatcher: nvidiaDispatcher,
@@ -596,19 +573,19 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
 
               if ((upstreamRateLimited || upstreamServerError) && attempt < RETRY_DELAYS_MS.length) {
                 const wait = RETRY_DELAYS_MS[attempt];
-                console.log(`[Analyze] NIM responded ${res.status} (${upstreamRateLimited ? 'rate-limited' : 'server error'}), retrying in ${wait / 1000}s...`);
-                lastError = new Error(`NIM HTTP ${res.status}`);
+                console.log(`[Analyze] ${provider} responded ${res.status} (${upstreamRateLimited ? 'rate-limited' : 'server error'}), retrying in ${wait / 1000}s...`);
+                lastError = new Error(`${provider} HTTP ${res.status}`);
                 await new Promise(r => setTimeout(r, wait));
                 continue;
               }
 
               if (!res.ok || data.error) {
                 throw new Error(
-                  `NIM HTTP ${res.status}: ${data.error?.message || JSON.stringify(data).slice(0, 300)}`
+                  `${provider} HTTP ${res.status}: ${data.error?.message || JSON.stringify(data).slice(0, 300)}`
                 );
               }
 
-              console.log('[Analyze] NVIDIA succeeded, firing self-callback...');
+              console.log(`[Analyze] ${provider} succeeded, firing self-callback...`);
               fetch(selfCallbackUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -620,7 +597,7 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
               const transient = isTransientError(err);
               const willRetry = transient && attempt < RETRY_DELAYS_MS.length;
               console.error(
-                `[Analyze] NVIDIA fetch failed (attempt ${attempt + 1}, transient=${transient}):`,
+                `[Analyze] ${provider} fetch failed (attempt ${attempt + 1}, transient=${transient}):`,
                 err?.code || err?.name, err?.message,
               );
               if (!willRetry) break;
@@ -650,10 +627,10 @@ Return ONLY {"script": "..."} — a single JSON object with one "script" string.
       } else {
         // QStash branch — used when running on serverless platforms with short timeouts.
         const message = await qstashClient.publishJSON({
-          url: 'https://integrate.api.nvidia.com/v1/chat/completions',
+          url: providerUrl,
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${nvidiaApiKey}`, 'Accept': 'application/json' },
-          body: nvidiaPayload,
+          headers: { ...providerHeaders, 'Accept': 'application/json' },
+          body: providerPayload,
           callback: callbackUrl,
         });
 
